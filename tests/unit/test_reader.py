@@ -43,7 +43,7 @@ def test_blank_lines_are_kept_with_their_number() -> None:
 def test_utf8_bom_is_ignored_on_the_first_line_only() -> None:
     lines, _ = read_all(b"\xef\xbb\xbffirst\n\xef\xbb\xbfsecond\n")
     assert lines[0].text == "first"
-    assert lines[1].text == "﻿second"
+    assert lines[1].text == "\ufeffsecond"
 
 
 def test_invalid_utf8_is_replaced_and_flagged() -> None:

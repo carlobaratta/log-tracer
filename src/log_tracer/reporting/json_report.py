@@ -48,13 +48,30 @@ _SEVERITY_ORDER: Final = (Severity.HIGH, Severity.MEDIUM, Severity.LOW)
 
 
 def dumps(report: Report) -> str:
-    """Serialize ``report`` as a single JSON document followed by a newline (CLI-1).
+    """Serialize ``report`` as a single JSON document followed by a newline (CLI-1)."""
+    return _dumps(report_to_dict(report))
 
-    ``allow_nan=False`` turns a NaN or infinity that slipped into the data into
-    an error, instead of emitting ``NaN``, which is not valid JSON.
-    """
-    data = report_to_dict(report)
+
+def dumps_top_errors(report: Report) -> str:
+    """Serialize the ``top-errors`` document (see :func:`top_errors_to_dict`)."""
+    return _dumps(top_errors_to_dict(report))
+
+
+def _dumps(data: JsonObject) -> str:
+    # allow_nan=False turns a NaN or infinity that slipped into the data into
+    # an error, instead of emitting ``NaN``, which is not valid JSON.
     return json.dumps(data, ensure_ascii=False, allow_nan=False, indent=2) + "\n"
+
+
+def top_errors_to_dict(report: Report) -> JsonObject:
+    """The ``top-errors`` output: report metadata, inputs and error groups only.
+
+    Every part has the same shape as in the full report, so a consumer can
+    parse both with the same code.
+    """
+    full = report_to_dict(report)
+    keys = ("schema_version", "tool", "generated_at", "inputs", "skipped_files", "top_errors")
+    return {key: full[key] for key in keys}
 
 
 def report_to_dict(report: Report) -> JsonObject:

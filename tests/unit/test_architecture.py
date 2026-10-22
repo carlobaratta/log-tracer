@@ -37,12 +37,16 @@ LAYERS: dict[str, Layer] = {
     "log_tracer.ingestion": Layer(internal=(*CORE, "log_tracer.ingestion")),
     "log_tracer.analysis": Layer(internal=(*CORE, "log_tracer.analysis")),
     "log_tracer.reporting": Layer(internal=(*CORE, "log_tracer.reporting")),
+    # Rich is allowed only where text meets the terminal: here and in the CLI.
+    "log_tracer.reporting.terminal": Layer(
+        internal=(*CORE, "log_tracer.reporting"), third_party=("rich",)
+    ),
     "log_tracer.pipeline": Layer(
         internal=(*CORE, "log_tracer.__version__", "log_tracer.ingestion", "log_tracer.analysis")
     ),
     # The CLI is the composition root: it may use every layer, and it is the
     # only module allowed to import Typer.
-    "log_tracer.cli": Layer(internal=ANYTHING, third_party=("typer",)),
+    "log_tracer.cli": Layer(internal=ANYTHING, third_party=("typer", "rich")),
 }
 
 
@@ -116,6 +120,8 @@ def test_imports_respect_the_layer_rules(module: str) -> None:
         ("typer.Typer", LAYERS["log_tracer.analysis"], False),
         ("typer", LAYERS["log_tracer.cli"], True),
         ("rich.console", LAYERS["log_tracer.models"], False),
+        ("rich.console", LAYERS["log_tracer.reporting"], False),
+        ("rich.table", LAYERS["log_tracer.reporting.terminal"], True),
         ("datetime.UTC", LAYERS["log_tracer.models"], True),
     ],
 )

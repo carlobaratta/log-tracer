@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -90,16 +91,15 @@ def test_sample_log_produces_the_expected_report() -> None:
 
 
 @pytest.mark.usefixtures("in_repo")
-def test_json_is_the_default_format_for_now() -> None:
-    explicit = report_of(invoke("analyze", "examples/logs/sample.log", "--format", "json"))
-    default = report_of(invoke("analyze", "examples/logs/sample.log"))
-    del explicit["generated_at"], default["generated_at"]
-    assert explicit == default
+def test_text_is_the_default_format() -> None:
+    result = invoke("analyze", "examples/logs/sample.log")
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout.startswith("Log Tracer 0.1.0 · 1 file · 25 events · 1 unparsed line\n")
 
 
 @pytest.mark.usefixtures("in_repo")
 def test_stdout_contains_exactly_one_json_document() -> None:  # CLI-1
-    result = invoke("analyze", "examples/logs/sample.log")
+    result = invoke("analyze", "examples/logs/sample.log", "--format", "json")
     assert result.stdout.endswith("}\n")
     decoder = json.JSONDecoder()
     _, end = decoder.raw_decode(result.stdout)
@@ -108,7 +108,7 @@ def test_stdout_contains_exactly_one_json_document() -> None:  # CLI-1
 
 def test_empty_file_is_a_valid_analysis(in_tmp: Path) -> None:
     (in_tmp / "empty.log").write_text("", encoding="utf-8")
-    report = report_of(invoke("analyze", "empty.log"))
+    report = report_of(invoke("analyze", "empty.log", "--format", "json"))
     assert report["summary"]["events"] == 0
     assert report["summary"]["time_range"] == {"start": None, "end": None}
     assert report["findings"] == []
@@ -116,7 +116,7 @@ def test_empty_file_is_a_valid_analysis(in_tmp: Path) -> None:
 
 def test_malformed_lines_do_not_stop_the_analysis(in_tmp: Path) -> None:
     (in_tmp / "bad.log").write_text('garbage\n{"json": true}\n', encoding="utf-8")
-    report = report_of(invoke("analyze", "bad.log"))
+    report = report_of(invoke("analyze", "bad.log", "--format", "json"))
     assert report["summary"]["events"] == 0
     assert report["summary"]["unparsed_lines"] == 2
 
@@ -126,7 +126,7 @@ def test_malformed_lines_do_not_stop_the_analysis(in_tmp: Path) -> None:
 
 @pytest.mark.usefixtures("in_repo")
 def test_examples_directory_combines_text_and_json_lines() -> None:
-    result = invoke("analyze", "examples/logs")
+    result = invoke("analyze", "examples/logs", "--format", "json")
     report = report_of(result)
     assert result.stderr == ""
 
@@ -168,8 +168,8 @@ def test_input_format_reads_a_log_file_as_json_lines(in_tmp: Path) -> None:
     (in_tmp / "app.log").write_text(
         '{"ts": "2026-10-16T14:00:00Z", "level": "error", "msg": "boom"}\n', encoding="utf-8"
     )
-    default = report_of(invoke("analyze", "app.log"))
-    forced = report_of(invoke("analyze", "app.log", "--input-format", "jsonl"))
+    default = report_of(invoke("analyze", "app.log", "--format", "json"))
+    forced = report_of(invoke("analyze", "app.log", "--input-format", "jsonl", "--format", "json"))
     assert (default["summary"]["events"], default["summary"]["unparsed_lines"]) == (0, 1)
     assert (forced["summary"]["events"], forced["summary"]["unparsed_lines"]) == (1, 0)
     assert forced["inputs"][0]["format"] == "jsonl"
@@ -179,7 +179,7 @@ def test_warnings_go_to_stderr_and_stdout_stays_valid_json(in_tmp: Path) -> None
     (in_tmp / "app.log").write_text(
         '{"ts": "2026-10-16T14:00:00Z", "level": "error", "msg": "boom"}\n', encoding="utf-8"
     )
-    result = invoke("analyze", "app.log")
+    result = invoke("analyze", "app.log", "--format", "json")
     report = report_of(result)
     assert result.stderr == (
         "Warning: 100% of the non-blank lines in app.log could not be parsed as text\n"
@@ -247,7 +247,7 @@ def test_internal_error_exits_with_code_70_and_a_traceback(
 
     monkeypatch.setattr(cli, "run_analysis", explode)
     (in_tmp / "app.log").write_text("", encoding="utf-8")
-    result = invoke("analyze", "app.log")
+    result = invoke("analyze", "app.log", "--format", "json")
     assert result.exit_code == 70
     assert result.stdout == ""
     assert "Internal error" in result.stderr
@@ -285,7 +285,7 @@ def test_unreadable_file_is_reported_on_stderr_and_skipped(in_tmp: Path) -> None
     locked.write_text("2026-10-16T14:00:00Z INFO [api] secret\n", encoding="utf-8")
     locked.chmod(0)
     try:
-        result = invoke("analyze", "ok.log", "locked.log")
+        result = invoke("analyze", "ok.log", "locked.log", "--format", "json")
     finally:
         locked.chmod(0o644)
     report = report_of(result)
@@ -316,3 +316,110 @@ def test_only_unreadable_files_exit_with_code_3(in_tmp: Path) -> None:  # §9
     assert result.stderr == (
         "Error: none of the input files could be read (locked.log: Permission denied)\n"
     )
+
+
+# --- Text output (SPEC §5.3) --------------------------------------------------------
+
+
+def cells(text: str) -> list[list[str]]:
+    return [re.split(r" {2,}", line.strip()) for line in text.splitlines() if line.strip()]
+
+
+@pytest.mark.usefixtures("in_repo")
+def test_text_summary_of_the_examples() -> None:
+    result = runner.invoke(app, ["analyze", "examples/logs"], env={"COLUMNS": "160"})
+    assert result.exit_code == 0, result.stderr
+    assert result.stderr == ""
+    out = result.stdout
+    assert "\x1b" not in out  # CLI-3: no colors when stdout is not a terminal
+    lines = [line.strip() for line in out.splitlines()]
+    assert lines[0] == "Log Tracer 0.1.0 · 2 files · 34 events · 3 unparsed lines"
+    assert "Time range (UTC): 2026-10-16T14:03:21.004Z → 2026-10-16T14:06:02.011Z" in lines
+    assert "Findings (3)" in lines
+    assert [
+        "medium",
+        "recurring_error",
+        "Recurring error in inventory: Stock sync with warehouse failed: HTTP…",
+        "3",
+    ] in cells(out)
+    assert "1. 3x api-gateway: POST /checkout failed" in lines
+    assert "first 14:03:24.910Z · last 14:05:23.897Z · example examples/logs/sample.log:6" in lines
+    assert "Levels: ERROR 11 · WARNING 6 · INFO 14 · DEBUG 2 · UNKNOWN 1" in lines
+    assert "examples/logs/sample.jsonl (jsonl): 9 events, 2 unparsed" in lines
+    assert "Unparsed lines: no_match 1 · invalid_json 1 · not_an_object 1" in lines
+
+
+def test_text_output_survives_a_non_utf8_stdout(in_tmp: Path) -> None:  # NFR-4, CLI-1
+    # On Windows, redirected output uses the locale code page (e.g. cp1252),
+    # which cannot encode characters such as "→" or "─".
+    (in_tmp / "app.log").write_text(
+        "2026-10-16T14:00:00Z ERROR [api] Zahlung fehlgeschlagen → 日本\n", encoding="utf-8"
+    )
+    for args in (["analyze", "app.log"], ["analyze", "app.log", "--format", "json"]):
+        completed = subprocess.run(
+            [sys.executable, "-m", "log_tracer", *args],
+            capture_output=True,
+            check=False,
+            env={**os.environ, "PYTHONIOENCODING": "cp1252"},
+        )
+        assert completed.returncode == 0, completed.stderr.decode("utf-8", "replace")
+        assert "→ 日本".encode() in completed.stdout  # written as UTF-8
+
+
+# --- --output and --fail-on (SPEC §5.2) ----------------------------------------------
+
+
+def test_output_writes_the_same_json_report_as_stdout(in_tmp: Path) -> None:
+    (in_tmp / "app.log").write_text("2026-10-16T14:00:00Z ERROR [api] boom\n", encoding="utf-8")
+    result = invoke("analyze", "app.log", "--format", "json", "--output", "report.json")
+    assert result.exit_code == 0, result.stderr
+    assert (in_tmp / "report.json").read_text(encoding="utf-8") == result.stdout
+
+
+def test_output_is_written_whatever_the_stdout_format(in_tmp: Path) -> None:
+    (in_tmp / "app.log").write_text("2026-10-16T14:00:00Z ERROR [api] boom\n", encoding="utf-8")
+    result = invoke("analyze", "app.log", "--output", "report.json")
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout.startswith("Log Tracer")
+    saved = json.loads((in_tmp / "report.json").read_text(encoding="utf-8"))
+    assert saved["summary"]["events"] == 1
+
+
+def test_unwritable_output_exits_with_code_3_and_prints_nothing(in_tmp: Path) -> None:
+    (in_tmp / "app.log").write_text("2026-10-16T14:00:00Z ERROR [api] boom\n", encoding="utf-8")
+    result = invoke("analyze", "app.log", "--output", "missing/dir/report.json")
+    assert result.exit_code == 3
+    assert result.stdout == ""
+    assert result.stderr == (
+        "Error: cannot write the report to missing/dir/report.json (No such file or directory)\n"
+    )
+
+
+@pytest.mark.usefixtures("in_repo")
+@pytest.mark.parametrize("threshold", ["low", "medium"])
+def test_fail_on_exits_with_code_1_after_printing_the_output(threshold: str) -> None:
+    result = invoke("analyze", "examples/logs", "--fail-on", threshold)
+    assert result.exit_code == 1
+    assert result.stdout.startswith("Log Tracer")
+    assert result.stderr == (
+        f"Found 3 findings with severity {threshold} or higher (--fail-on {threshold})\n"
+    )
+
+
+@pytest.mark.usefixtures("in_repo")
+def test_fail_on_keeps_stdout_valid_json() -> None:
+    result = invoke("analyze", "examples/logs", "--format", "json", "--fail-on", "medium")
+    assert result.exit_code == 1
+    assert len(json.loads(result.stdout)["findings"]) == 3
+
+
+@pytest.mark.usefixtures("in_repo")
+def test_fail_on_below_the_threshold_exits_with_code_0() -> None:
+    result = invoke("analyze", "examples/logs", "--fail-on", "high")
+    assert result.exit_code == 0
+    assert result.stderr == ""
+
+
+def test_unknown_fail_on_value_is_a_usage_error(in_tmp: Path) -> None:
+    (in_tmp / "app.log").write_text("", encoding="utf-8")
+    assert invoke("analyze", "app.log", "--fail-on", "critical").exit_code == 2

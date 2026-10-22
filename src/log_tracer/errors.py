@@ -17,3 +17,7 @@ class LogTracerError(Exception):
 
 class InputError(LogTracerError):
     """The input paths cannot be analyzed (missing, unsupported or unreadable)."""
+
+
+class OutputError(LogTracerError):
+    """An output file (``--output``) cannot be written."""

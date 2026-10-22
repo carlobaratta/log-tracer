@@ -1,111 +1,23 @@
 """JSON encoding of the report (SPEC §6)."""
 
-import dataclasses
 import json
 from datetime import UTC, datetime, timedelta, timezone
-from types import MappingProxyType
 
 import pytest
 
-from log_tracer.config import AnalysisConfig
 from log_tracer.models import (
-    AnalysisResult,
-    ErrorGroup,
-    EvidenceValue,
-    Finding,
-    IngestionSummary,
-    IngestionWarning,
     InputFormat,
-    IssueCode,
-    Level,
-    Report,
-    RuleName,
-    RuleOutcome,
-    Severity,
-    SkippedFile,
-    SkipReason,
-    SourceRef,
     SourceSummary,
     TimeRange,
-    UnparsedLine,
-    UnparsedReason,
-    WarningCode,
 )
-from log_tracer.reporting.json_report import dumps, format_timestamp, report_to_dict
-from tests.factories import T0, at
-
-SOURCE = SourceSummary(
-    path="logs/app.log",
-    format=InputFormat.TEXT,
-    size_bytes=1234,
-    sha256="ab" * 32,
-    lines=10,
-    blank_lines=1,
-    events=7,
-    unparsed=2,
-    error=None,
+from log_tracer.reporting.json_report import (
+    dumps,
+    dumps_top_errors,
+    format_timestamp,
+    report_to_dict,
+    top_errors_to_dict,
 )
-
-FINDING = Finding(
-    id="recurring_error:0123456789ab",
-    rule=RuleName.RECURRING_ERROR,
-    severity=Severity.MEDIUM,
-    title="Recurring error in payments: timeout",
-    description="3 error events from service 'payments' match the pattern \"timeout\".",
-    evidence=MappingProxyType({"count": 3, "has_critical": False, "first_seen": at(1)}),
-    event_count=3,
-    events=(SourceRef("logs/app.log", 4),),
-    correlation_ids=(),
-)
-
-
-def make_report(
-    *,
-    sources: tuple[SourceSummary, ...] = (SOURCE,),
-    time_range: TimeRange | None = None,
-    evidence: dict[str, EvidenceValue] | None = None,
-) -> Report:
-    finding = FINDING
-    if evidence is not None:
-        finding = dataclasses.replace(FINDING, evidence=MappingProxyType(evidence))
-    return Report(
-        tool_version="0.1.0",
-        generated_at=T0,
-        config=AnalysisConfig(),
-        ingestion=IngestionSummary(
-            sources=sources,
-            skipped=(SkippedFile("logs/notes.md", SkipReason.UNSUPPORTED_EXTENSION),),
-            unparsed_counts=MappingProxyType({UnparsedReason.NO_MATCH: 2}),
-            unparsed_samples=(
-                UnparsedLine(SourceRef("logs/app.log", 5), UnparsedReason.NO_MATCH, "garbage"),
-            ),
-            issue_counts=MappingProxyType({IssueCode.LEVEL_UNKNOWN: 1}),
-            warnings=(
-                IngestionWarning(
-                    WarningCode.MOSTLY_UNPARSED,
-                    "logs/app.log",
-                    "66% of the non-blank lines in logs/app.log could not be parsed as text",
-                ),
-            ),
-        ),
-        analysis=AnalysisResult(
-            level_counts=MappingProxyType({Level.INFO: 4, Level.ERROR: 3}),
-            time_range=time_range,
-            top_errors=(
-                ErrorGroup(
-                    service="payments",
-                    fingerprint="timeout",
-                    count=3,
-                    has_critical=False,
-                    first_seen=at(1),
-                    last_seen=at(9),
-                    events=(SourceRef("logs/app.log", 4),),
-                ),
-            ),
-            rules=(RuleOutcome(RuleName.RECURRING_ERROR, "ok", None, (finding,)),),
-            findings=(finding,),
-        ),
-    )
+from tests.factories import at, make_report
 
 
 def test_top_level_keys_are_present_in_a_fixed_order() -> None:  # REP-1
@@ -317,3 +229,28 @@ def test_timestamps_are_rfc3339_utc_with_microseconds(value: datetime, expected:
 def test_naive_timestamps_are_rejected() -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
         format_timestamp(datetime(2026, 10, 16, 14, 3, 22))
+
+
+# --- top-errors document (SPEC §6) -------------------------------------------------
+
+
+def test_top_errors_document_has_metadata_inputs_and_groups() -> None:
+    report = make_report()
+    data = top_errors_to_dict(report)
+    assert list(data) == [
+        "schema_version",
+        "tool",
+        "generated_at",
+        "inputs",
+        "skipped_files",
+        "top_errors",
+    ]
+    full = report_to_dict(report)
+    for key in ("schema_version", "tool", "generated_at", "inputs", "skipped_files", "top_errors"):
+        assert data[key] == full[key]
+
+
+def test_top_errors_document_is_one_json_document() -> None:
+    text = dumps_top_errors(make_report())
+    assert text.endswith("}\n")
+    assert json.loads(text) == top_errors_to_dict(make_report())

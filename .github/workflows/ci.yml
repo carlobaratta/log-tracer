@@ -78,3 +78,5 @@ jobs:
           /tmp/smoke/bin/log-tracer --version
           /tmp/smoke/bin/log-tracer analyze examples/logs/ --format json > report.json
           /tmp/smoke/bin/python -m json.tool report.json > /dev/null
+          /tmp/smoke/bin/log-tracer analyze examples/logs/
+          /tmp/smoke/bin/log-tracer top-errors examples/logs/ --limit 3

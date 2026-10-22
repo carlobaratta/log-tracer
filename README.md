@@ -2,7 +2,7 @@
 
 Log Tracer is a local, offline command-line tool for analyzing log files. It reads them, normalizes every line into a common event model, and reports recurring problems with deterministic, documented rules. The same input and configuration always produce the same report. It needs no network access, credentials, or external services.
 
-> **Status: early development (increment 2 of 10).** Today Log Tracer reads text and JSON Lines logs, from single files or whole directories, and reports recurring errors as JSON. Terminal tables, request timelines (`inspect`) and the remaining rules come in later increments. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
+> **Status: early development (increment 3 of 10).** Today Log Tracer reads text and JSON Lines logs, from single files or whole directories, and reports recurring errors in the terminal or as JSON. Request timelines (`inspect`), configuration files and the remaining rules come in later increments. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
 
 ## Requirements
 
@@ -27,12 +27,32 @@ uv run log-tracer --version
 ## Usage
 
 ```bash
-log-tracer analyze examples/logs/                         # a directory, walked recursively
+log-tracer analyze examples/logs/                         # summary in the terminal
+log-tracer analyze examples/logs/ --format json           # full JSON report on stdout
+log-tracer analyze examples/logs/ --output report.json    # summary, and the JSON report in a file
 log-tracer analyze app.log worker.jsonl                   # explicit files
 log-tracer analyze service.log --input-format jsonl       # JSON Lines in a .log file
+log-tracer analyze logs/ --fail-on high                   # exit code 1 if a finding is high
+log-tracer top-errors examples/logs/ --limit 5            # the most frequent errors only
 ```
 
-The command writes a single JSON report to stdout, so you can pipe it to other programs. Errors, warnings and hints go to stderr. For example, Log Tracer warns when at least half of a file's lines cannot be parsed, because this usually means the file uses another format. On the bundled example, the report contains:
+```
+Log Tracer 0.1.0 · 2 files · 34 events · 3 unparsed lines
+Time range (UTC): 2026-10-16T14:03:21.004Z → 2026-10-16T14:06:02.011Z
+
+Findings (3)
+Severity   Rule              Title                                                       Events
+───────────────────────────────────────────────────────────────────────────────────────────────
+medium     recurring_error   Recurring error in api-gateway: POST /checkout failed            3
+...
+
+Top errors
+1. 3x api-gateway: POST /checkout failed
+   first 14:03:24.910Z · last 14:05:23.897Z · example examples/logs/sample.log:6
+...
+```
+
+Output on stdout is either the summary or a single JSON document, so you can pipe it to other programs; errors, warnings and hints go to stderr. Colors are used only on a terminal, and `NO_COLOR` turns them off. Text taken from the logs is always shown literally: terminal control sequences and bidirectional-override characters are displayed as escapes such as `\x1b`. Log Tracer also warns when at least half of a file's lines cannot be parsed, because this usually means the file uses another format. The JSON report contains:
 
 - the identity of each input (path, size, SHA-256);
 - line counts: events, blank lines, and unparsed lines with the reason for each;
@@ -47,8 +67,9 @@ Unparsable lines are counted and reported, never silently dropped.
 | Code | Meaning |
 |---|---|
 | 0 | Analysis completed, even if there are findings or unparsable lines |
+| 1 | `--fail-on` was given and a finding reached that severity |
 | 2 | Invalid command-line usage |
-| 3 | Input error: missing path, unsupported file type, directory without supported files, no readable file |
+| 3 | Input or output error: missing path, unsupported file type, directory without supported files, no readable file, `--output` file not writable |
 | 70 | Internal error, which is a bug. A traceback is printed on stderr |
 
 ### Input formats

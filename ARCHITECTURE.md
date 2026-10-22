@@ -114,9 +114,9 @@ Rispetto alla struttura suggerita dalla specifica iniziale ci sono quattro diffe
 | `analysis.rules.*` | Implementare una regola: `AnalysisContext` → `RuleOutcome` | Dipendere da altre regole |
 | `pipeline` | Comporre gli stadi, applicare i filtri, assemblare il `Report` | Stampare output o scrivere file |
 | `reporting.json_report` | Serializzare e deserializzare il `Report` in modo canonico e deterministico | Decidere cosa contiene il report |
-| `reporting.terminal` | Rendering con Rich: tabelle, timeline, escape del contenuto (CLI-4) | Calcolare statistiche |
+| `reporting.terminal` | Costruire oggetti Rich (tabelle, elenchi, timeline) a partire dal `Report`, con escape del contenuto dei log (CLI-4) | Stampare: decide la CLI dove scrivere; calcolare statistiche |
 | `state` | Scrittura atomica e lettura di `last-report.json`, creazione di `.gitignore` | Rianalizzare i log |
-| `cli` | Gestire argomenti e opzioni, chiamare pipeline e state, scegliere il rendering, tradurre le eccezioni in codici di uscita | Contenere logica di dominio |
+| `cli` | Gestire argomenti e opzioni, chiamare pipeline e state, scegliere il rendering, creare le console Rich, impostare stdout e stderr in UTF-8, tradurre le eccezioni in codici di uscita | Contenere logica di dominio |
 
 ### 3.1 Interfaccia delle regole
 
@@ -387,6 +387,7 @@ Il `Report` non contiene gli eventi (REP-2): `IngestionResult` è composto da `e
 | Contenuto di una riga (malformata, campo non valido) | Valore di ritorno: `UnparsedLine` / `IssueCode` | Conteggiata nell'`IngestionResult` e mai sollevata |
 | I/O su **un** file tra tanti | `OSError` intercettato **solo** attorno alla lettura di quel file | `SourceSummary.error`; l'analisi prosegue (ING-7) |
 | Ambiente: percorsi, nessuna sorgente leggibile | `InputError` | `cli` → codice 3 |
+| File di `--output` non scrivibile | `OutputError` | `cli` → codice 3, prima di stampare su stdout |
 | Configurazione | `ConfigError`, con il nome della chiave | `cli` → codice 2 |
 | Stato salvato mancante o incompatibile | `StateError` | `cli` → codice 3 |
 | Bug | Qualunque altra eccezione | Unica guardia in `cli.main()`: messaggio e traceback su stderr, codice 70 |
@@ -477,6 +478,8 @@ tests/
 | T-5 | Nessun registro di plugin per le regole | Quattro regole note non giustificano un meccanismo dinamico | Registro con decoratori |
 | T-6 | Test di architettura con `ast` | Circa 40 righe, nessuna dipendenza | `import-linter` |
 | T-7 | Python 3.12+ come requisito minimo e codice scritto per 3.12 | Imposto dalla specifica; la CI verifica 3.12, 3.13 e 3.14 | — |
+| T-8 | Console Rich create a ogni stampa, con `markup`, `emoji` e `highlight` disattivati; `soft_wrap` su stderr | Rich interpreta `[bold]` e `:warning:` nelle stringhe, colora i numeri sui terminali e manda a capo a 80 colonne su stderr: l'output dipenderebbe dal contenuto dei log e dal terminale. Creandole al momento della stampa si leggono `NO_COLOR`, `COLUMNS` e le redirezioni correnti. | Una console globale configurata all'avvio |
+| T-9 | `main()` imposta stdout e stderr in UTF-8 con `reconfigure` | Su Windows l'output rediretto usa cp1252: un carattere come `→` faceva fallire la stampa con `UnicodeEncodeError` (verificato con `PYTHONIOENCODING=cp1252`). | Sostituire i caratteri non rappresentabili, che altererebbe il contenuto dei log |
 
 Dipendenze:
 
@@ -489,7 +492,7 @@ Dipendenze:
 |---|---|---|
 | `quality` | ubuntu, Python 3.12 | `uv sync --locked` → `ruff check` → `ruff format --check` → `mypy` |
 | `test` | ubuntu × {3.12, 3.13, 3.14}, più windows e macos con 3.14 | `uv run pytest --cov` (inclusi i test `slow`); report di copertura come artefatto |
-| `package` | ubuntu, dopo `test` | `uv build` → installazione della wheel in un venv pulito → `log-tracer --version` → `log-tracer analyze examples/logs/ --format json` validato con `python -m json.tool` |
+| `package` | ubuntu, dopo `test` | `uv build` → installazione della wheel in un venv pulito → `log-tracer --version` → `log-tracer analyze examples/logs/ --format json` validato con `python -m json.tool`, poi `analyze` in testo e `top-errors` |
 
 Il workflow si avvia su `push` verso `main` e su `pull_request`, con `permissions: contents: read`, `concurrency` per annullare le esecuzioni superate e un `timeout-minutes` su ogni job. Le action sono fissate alla versione maggiore.
 
@@ -501,11 +504,11 @@ Il workflow si avvia su `push` verso `main` e su `pull_request`, con `permission
 |---|---|---|
 | 1 | **Slice verticale:** file `.log` → eventi → `recurring_error` → report JSON su stdout; scheletro del progetto e CI | `models`, `errors`, `ingestion` (testo), `analysis.fingerprint`, `analysis.statistics`, `rules.recurring_error`, `reporting.json_report` (solo encode), `pipeline`, `cli` (solo `analyze`) |
 | 2 | JSONL, directory, più file, codifiche, test basati su proprietà | `ingestion.jsonl_format`, `discovery` completo |
-| 3 | Output nel terminale con Rich, `--format`, `top-errors`, codici di uscita completi | `reporting.terminal` |
+| 3 | Output nel terminale con Rich, `--format`, `top-errors`, `--output`, `--fail-on` (codici di uscita completi, tranne il 4) | `reporting.terminal` |
 | 4 | Correlazione e `inspect ID PATH...` | `analysis.correlation` |
 | 5 | Configurazione TOML e `high_latency` | `config` (caricamento), `rules.high_latency` |
 | 6 | `warning_before_error` ed `error_spike` | due regole |
-| 7 | Stato persistente, `report`, `inspect` senza percorsi, filtri, `--fail-on` | `state`, decode del report |
+| 7 | Stato persistente, `report`, `inspect` senza percorsi, filtri | `state`, decode del report |
 | 8 | Esempi, test golden, `docs/demo.md`, README | — |
 | 9 | Consolidamento: grandi input, revisione dei casi limite, revisione della copertura | — |
 | 10 | Margine, rifinitura, rilascio `v0.1.0` | — |

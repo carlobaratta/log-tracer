@@ -293,8 +293,8 @@ Gli stessi gruppi alimentano anche la sezione `top_errors` del report (i primi `
 
 | Comando | Scopo | Scrive stato? |
 |---|---|---|
-| `log-tracer analyze PATH...` | Esegue l'analisi completa: riepilogo e finding. | Sì (§8) |
-| `log-tracer top-errors PATH...` | Mostra solo gli errori più frequenti. | No |
+| `log-tracer analyze PATH...` | Esegue l'analisi completa e stampa un riepilogo testuale o, con `--format json`, il report (§6). | Sì (§8) |
+| `log-tracer top-errors PATH...` | Mostra solo gli errori più frequenti, come elenco o, con `--format json`, come documento JSON ridotto (REP-5). | No |
 | `log-tracer inspect ID [PATH...]` | Mostra la timeline del gruppo che contiene l'ID, cercato sia come request_id sia come trace_id. Senza PATH usa gli input dell'ultima analisi salvata. | No |
 | `log-tracer report` | Mostra o esporta il report dell'ultima analisi salvata, senza rieseguirla. | No |
 | `log-tracer --version` | Stampa la versione. | No |
@@ -309,8 +309,8 @@ Gli stessi gruppi alimentano anche la sezione `top_errors` del report (i primi `
 | `--config FILE` | `analyze`, `top-errors` | File di configurazione TOML (§7). |
 | `--service NAME` | `analyze`, `top-errors` | Limita l'analisi a uno o più servizi. È ripetibile. |
 | `--since TS`, `--until TS` | `analyze`, `top-errors` | Limita l'analisi a un intervallo temporale (ISO 8601). Quando sono attivi, gli eventi senza timestamp sono esclusi e conteggiati. |
-| `--limit N` | `top-errors` | Numero di gruppi da mostrare. Il default è 10. |
-| `--fail-on low\|medium\|high` | `analyze` | Esce con codice 1 se esiste un finding di severità pari o superiore. |
+| `--limit N` | `top-errors` | Numero di gruppi da mostrare, almeno 1. Il default è 10. Può superare `report.top_errors`. |
+| `--fail-on low\|medium\|high` | `analyze` | Esce con codice 1 se esiste un finding di severità pari o superiore. L'output viene comunque stampato per intero e su stderr compare il motivo, ad esempio `Found 3 findings with severity medium or higher (--fail-on medium)`. |
 | `--no-save` | `analyze` | Non salva lo stato. |
 | `--state-dir DIR` | `analyze`, `inspect`, `report` | Directory dello stato. Il default è `.log-tracer`; si può impostare anche con la variabile `LOG_TRACER_STATE_DIR`. |
 
@@ -318,12 +318,16 @@ I filtri `--service`, `--since` e `--until` definiscono il **perimetro dell'anal
 
 ### 5.3 Contratto di output
 
-- **CLI-1** Lo stdout contiene solo l'output richiesto. Con `--format json` contiene esattamente un documento JSON valido in UTF-8, terminato da un newline.
+- **CLI-1** Lo stdout contiene solo l'output richiesto. Con `--format json` contiene esattamente un documento JSON valido, terminato da un newline. Stdout e stderr sono sempre in UTF-8, anche quando la localizzazione indica un'altra codifica: su Windows, ad esempio, l'output rediretto userebbe cp1252, che non può rappresentare molti caratteri presenti nei log.
 - **CLI-2** Avvisi, errori e suggerimenti vanno su stderr.
 - **CLI-3** I colori sono usati solo se l'output è un terminale. La variabile `NO_COLOR` è rispettata.
-- **CLI-4** Il contenuto dei log mostrato nel terminale è sempre trattato come testo: non è mai interpretato come markup di Rich né come sequenza di controllo del terminale. I caratteri di controllo sono sostituiti.
+- **CLI-4** Il contenuto dei log mostrato nel terminale è sempre trattato come testo letterale: markup di Rich (`[bold]`) e codici emoji (`:warning:`) non vengono interpretati. Sono mostrati come escape visibili (ad esempio `\x1b`, `\n`, `\u202e`):
+  - i caratteri di controllo (C0, DEL, C1), che potrebbero agire sul terminale;
+  - i caratteri che cambiano la direzione del testo (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069), che potrebbero far apparire il testo in un ordine diverso da quello reale;
+  - i separatori di riga e di paragrafo (U+2028, U+2029).
 - **CLI-5** Nell'output testuale i timestamp sono mostrati in UTC.
-- **CLI-6** Ogni messaggio d'errore indica cosa è successo e, quando possibile, come rimediare. Ad esempio: `No saved analysis in .log-tracer/. Run 'log-tracer analyze PATH' first.`
+- **CLI-6** Ogni messaggio d'errore indica cosa è successo e, quando possibile, come rimediare. Ad esempio: `No saved analysis in .log-tracer/. Run 'log-tracer analyze PATH' first.` I messaggi su stderr non vanno mai a capo, così si possono cercare e confrontare così come sono.
+- **CLI-7** Il contenuto del riepilogo testuale non dipende dalla larghezza del terminale. Su un terminale stretto il testo va a capo ma non viene mai tagliato, con due sole eccezioni a lunghezza fissa: i titoli dei finding (70 caratteri) e i pattern degli errori (120 caratteri), accorciati con `…`. I gruppi di errori sono mostrati come elenco su due righe e non come tabella, perché una tabella con timestamp completi comprimerebbe il pattern fino a farlo sparire.
 
 ### 5.4 Codici di uscita
 
@@ -332,7 +336,7 @@ I filtri `--service`, `--since` e `--until` definiscono il **perimetro dell'anal
 | 0 | Successo, anche quando ci sono finding o righe non interpretabili. |
 | 1 | È stata raggiunta la soglia di `--fail-on`. |
 | 2 | Errore d'uso o di configurazione: opzione non valida o file di configurazione non valido. |
-| 3 | Errore di input o di stato: percorso inesistente, nessun file supportato, nessuna sorgente leggibile, nessuna analisi salvata, report salvato incompatibile. |
+| 3 | Errore di input, output o stato: percorso inesistente, nessun file supportato, nessuna sorgente leggibile, file di `--output` non scrivibile, nessuna analisi salvata, report salvato incompatibile. |
 | 4 | `inspect`: identificativo non trovato. |
 | 70 | Errore interno, cioè un bug. Viene stampato un messaggio con il traceback su stderr. |
 
@@ -360,6 +364,7 @@ I filtri `--service`, `--since` e `--until` definiscono il **perimetro dell'anal
 - **REP-2** Gli eventi sono riferiti come `{"path": …, "line": …}`. Il report non contiene il contenuto integrale dei log, fatta eccezione per gli estratti delle righe non interpretabili.
 - **REP-3** I percorsi sono riportati come forniti dall'utente, in notazione POSIX. Il report non aggiunge percorsi assoluti che potrebbero esporre informazioni locali.
 - **REP-4** Per lo stesso input e la stessa configurazione, due report differiscono solo in `generated_at`.
+- **REP-5** `top-errors --format json` produce un documento con le sole chiavi `schema_version`, `tool`, `generated_at`, `inputs`, `skipped_files` e `top_errors`. Ognuna ha la stessa forma che ha nel report completo, così lo stesso codice può leggere entrambi i documenti.
 
 ---
 
@@ -423,6 +428,8 @@ critical_ms = 8000
 | Opzione o configurazione non valida | Si ferma | stderr | 2 |
 | Nessuna analisi salvata | Si ferma con un suggerimento | stderr | 3 |
 | ID non trovato in `inspect` | Si ferma con un messaggio | stderr | 4 |
+| File di `--output` non scrivibile | Si ferma prima di stampare su stdout | stderr | 3 |
+| Soglia di `--fail-on` raggiunta | Stampa l'output per intero, poi il motivo | stdout e stderr | 1 |
 | Errore inatteso | Messaggio e traceback | stderr | 70 |
 
 Gli errori di contenuto (righe e campi) non interrompono mai l'analisi. Gli errori d'ambiente (percorsi, permessi, configurazione) la interrompono solo quando non resta nulla di sensato da analizzare.
@@ -474,6 +481,8 @@ Gli errori di contenuto (righe e campi) non interrompono mai l'analisi. Gli erro
 | D-8 | Le soglie si leggono solo da un file TOML esplicito | `tomllib` è nella libreria standard; nessuna configurazione implicita. | Ricerca automatica di `log-tracer.toml` o `pyproject.toml`. |
 | D-9 | I filtri CLI restringono il perimetro dell'analisi | La semantica è unica e chiara; il report registra i filtri. | Filtri solo di visualizzazione, che confondono quando il JSON non coincide con l'output testuale. |
 | D-10 | Nessun filtro `--level` in `analyze` | Escludere i WARNING annullerebbe RUL-3. | — |
+| D-11 | Il formato predefinito di stdout è `text`; il JSON si ottiene con `--format json` o `--output` | Uno strumento da terminale si legge da una persona; il JSON resta completo e stabile per i programmi. | JSON come predefinito: illeggibile a colpo d'occhio. |
+| D-12 | `--fail-on` e `--output` anticipati all'incremento 3 | Dipendono solo da componenti già presenti e completano i codici di uscita (tranne il 4, legato a `inspect`). | Rimandarli all'incremento 7. |
 
 ## 13. Questioni aperte
 
