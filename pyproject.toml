@@ -1,0 +1,82 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "log-tracer"
+dynamic = ["version"]
+description = "Local, offline CLI that analyzes log files and reports recurring problems with deterministic rules."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.7",
+]
+classifiers = [
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: System :: Logging",
+    "Typing :: Typed",
+]
+
+[project.scripts]
+log-tracer = "log_tracer.cli:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+]
+
+[tool.hatch.version]
+path = "src/log_tracer/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/log_tracer"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle
+    "F",       # pyflakes
+    "I",       # isort
+    "N",       # pep8-naming
+    "B",       # flake8-bugbear
+    "BLE",     # no blind `except Exception`
+    "C4",      # comprehensions
+    "PTH",     # prefer pathlib
+    "PT",      # pytest style
+    "RET",     # return statements
+    "SIM",     # simplifications
+    "UP",      # pyupgrade
+    "RUF",     # ruff-specific
+]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+markers = ["slow: tests on large generated inputs"]
+
+[tool.coverage.run]
+branch = true
+source = ["log_tracer"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_covered = true
+exclude_also = ["if TYPE_CHECKING:", "assert_never\\("]

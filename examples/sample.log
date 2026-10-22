@@ -1,0 +1,27 @@
+2026-10-16T14:03:21.004Z INFO [api-gateway] Service started version=2.4.1
+2026-10-16T14:03:22.120Z INFO [api-gateway] POST /checkout request_id=req-184 trace_id=4bf92f3577b34da6
+2026-10-16T14:03:22.135Z DEBUG [cart] Cart loaded with 3 items request_id=req-184 trace_id=4bf92f3577b34da6
+2026-10-16T14:03:22.410Z WARN [payments] Payment provider slow, retrying attempt=1 request_id=req-184 trace_id=4bf92f3577b34da6
+2026-10-16T14:03:24.902Z ERROR [payments] Payment gateway timeout after 2500 ms request_id=req-184 trace_id=4bf92f3577b34da6 duration_ms=2500
+2026-10-16T14:03:24.910Z ERROR [api-gateway] POST /checkout failed status=502 request_id=req-184 trace_id=4bf92f3577b34da6 duration_ms=2790
+2026-10-16T14:03:30.002Z INFO [api-gateway] POST /checkout request_id=req-185 trace_id=9c1e2d3f4a5b6c7d
+2026-10-16T14:03:30.344Z INFO [payments] Payment authorized request_id=req-185 trace_id=9c1e2d3f4a5b6c7d duration_ms=340
+2026-10-16T14:03:30.421Z INFO [api-gateway] POST /checkout completed status=200 request_id=req-185 trace_id=9c1e2d3f4a5b6c7d duration_ms=419
+
+2026-10-16T14:03:41.550Z INFO [api-gateway] GET /orders/9912 request_id=req-186 trace_id=a7b8c9d0e1f2a3b4
+2026-10-16T14:03:43.398Z WARN [orders-db] Slow query on table orders rows=18234 request_id=req-186 trace_id=a7b8c9d0e1f2a3b4 duration_ms=1840
+2026-10-16T14:03:43.460Z INFO [api-gateway] GET /orders/9912 completed status=200 request_id=req-186 trace_id=a7b8c9d0e1f2a3b4 duration_ms=1910
+2026-10-16T14:04:02.003Z ERROR [scheduler] Job cleanup-sessions failed: connection refused 10.0.4.12:5432
+    at PgPool.connect (pool.js:88)
+2026-10-16T14:04:15.870Z INFO [api-gateway] POST /checkout request_id=req-187 trace_id=c3d4e5f6a7b8c9d0
+2026-10-16T14:04:16.101Z WARN [payments] Payment provider slow, retrying attempt=1 request_id=req-187 trace_id=c3d4e5f6a7b8c9d0
+2026-10-16T14:04:18.603Z ERROR [payments] Payment gateway timeout after 2500 ms request_id=req-187 trace_id=c3d4e5f6a7b8c9d0 duration_ms=2500
+2026-10-16T14:04:18.611Z ERROR [api-gateway] POST /checkout failed status=502 request_id=req-187 trace_id=c3d4e5f6a7b8c9d0 duration_ms=2741
+2026-10-16 14:05:10,250 INFO [legacy-billing] Invoice batch exported count=42
+2026-10-16T14:05:12.000Z NOTICE [orders-db] Autovacuum completed on table orders
+2026-10-16T14:05:20.774Z INFO [api-gateway] POST /checkout request_id=req-188 trace_id=e5f6a7b8c9d0e1f2
+2026-10-16T14:05:21.020Z WARN [payments] Payment provider slow, retrying attempt=1 request_id=req-188 trace_id=e5f6a7b8c9d0e1f2
+2026-10-16T14:05:21.388Z WARN [payments] Payment provider slow, retrying attempt=2 request_id=req-188 trace_id=e5f6a7b8c9d0e1f2
+2026-10-16T14:05:23.891Z ERROR [payments] Payment gateway timeout after 2500 ms request_id=req-188 trace_id=e5f6a7b8c9d0e1f2 duration_ms=2500
+2026-10-16T14:05:23.897Z ERROR [api-gateway] POST /checkout failed status=502 request_id=req-188 trace_id=e5f6a7b8c9d0e1f2 duration_ms=2797
+2026-10-16T14:06:02.011Z ERROR [scheduler] Job cleanup-sessions failed: connection refused 10.0.4.12:5432

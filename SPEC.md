@@ -1,0 +1,475 @@
+# Log Tracer — Specifica funzionale
+
+| | |
+|---|---|
+| Stato | Bozza in revisione |
+| Versione software di riferimento | 0.1.0 |
+| Ultimo aggiornamento | 2026-10-16 |
+
+Questo documento descrive **cosa** fa Log Tracer v0.1.0 e come si comporta nei casi limite.
+Il **come** (moduli, dipendenze, modello dei dati, test, CI) è descritto in [ARCHITECTURE.md](ARCHITECTURE.md).
+
+Convenzioni:
+
+- Ogni requisito ha un identificativo stabile (`ING-3`, `RUL-2`, …). I test che lo verificano lo citano nel nome o nella docstring.
+- **Deve** indica un requisito obbligatorio per la v0.1.0; **dovrebbe** indica un requisito desiderabile ma non bloccante.
+- Identificatori nel codice, chiavi JSON, opzioni e messaggi della CLI sono in inglese. La documentazione è in italiano (vedi Q-1).
+
+---
+
+## 1. Obiettivo e perimetro
+
+Log Tracer è uno strumento a riga di comando, locale e offline, che:
+
+1. legge file di log testuali e JSON Lines;
+2. normalizza ogni riga in un evento con un modello comune;
+3. correla gli eventi tramite `request_id` e `trace_id`;
+4. ricostruisce le timeline delle richieste;
+5. applica quattro regole diagnostiche deterministiche;
+6. presenta un riepilogo nel terminale ed esporta un report JSON.
+
+**Principio guida.** I risultati sono *indizi diagnostici*, non prove. Una correlazione temporale non dimostra una relazione causale. I testi prodotti dal programma usano formulazioni come "precede" o "coincide con" e non usano mai "causa".
+
+### 1.1 Fuori perimetro per la v0.1.0
+
+| Escluso | Motivo / conseguenza |
+|---|---|
+| Eventi multi-riga nel formato testuale (stack trace) | Ogni riga di continuazione è conteggiata come non interpretabile. Nel formato JSONL lo stack trace sta in un campo e non pone problemi. |
+| File compressi, lettura da stdin, monitoraggio in tempo reale | Possibili estensioni future. |
+| Timestamp numerici (epoch) e formati diversi da ISO 8601 | Un timestamp numerico è trattato come non valido. |
+| Campi annidati nei JSON (`{"service": {"name": …}}`) | L'oggetto annidato finisce negli attributi, ma non viene mappato sui campi del modello. |
+| Rilevamento del formato dal contenuto | Il formato si deduce dall'estensione oppure si forza con `--input-format`. |
+| SQLite, dashboard web, report HTML, machine learning e AI generativa | Fuori dai requisiti della prima versione. Il report HTML è opzionale e successivo. |
+
+### 1.2 Glossario
+
+| Termine | Significato |
+|---|---|
+| Sorgente | Un file di input. |
+| Evento | Una riga interpretata e normalizzata nel modello `Event`. |
+| Riga non interpretabile | Una riga che non può diventare un evento. È sempre conteggiata insieme al motivo. |
+| Problema di campo | Un evento valido con un campo mancante, non valido o completato da un'assunzione (ad esempio un timestamp assente). |
+| Livello | La gravità dichiarata dalla riga di log (`TRACE` … `CRITICAL`, oppure `UNKNOWN`). |
+| Severità | La gravità di un finding (`low`, `medium`, `high`). È un concetto distinto dal livello. |
+| Impronta (*fingerprint*) | Il messaggio normalizzato usato per raggruppare errori simili (§2.5). |
+| Gruppo di correlazione | Un insieme di eventi collegati da `request_id` e/o `trace_id` (§3). |
+| Timeline | Gli eventi di un gruppo ordinati nel tempo. |
+| Finding | Il risultato di una regola: tipo, severità, descrizione, eventi coinvolti ed evidenze. |
+| Evidenza | Un insieme di valori misurati (conteggi, soglie, durate) che giustifica un finding. |
+
+---
+
+## 2. Ingestion e normalizzazione
+
+### 2.1 Requisiti generali
+
+- **ING-1** L'input è costituito da uno o più percorsi, file o directory. Le directory sono visitate ricorsivamente. File e directory nascosti (con nome che inizia per `.`) sono ignorati. I link simbolici a directory non sono seguiti.
+- **ING-2** Il formato si deduce dall'estensione:
+  - `.log` e `.txt` corrispondono al formato `text`;
+  - `.jsonl` e `.ndjson` corrispondono al formato `jsonl`.
+
+  L'opzione `--input-format text|jsonl` forza il formato per tutti gli input. Il valore di default `auto` usa l'estensione. Dentro una directory, i file con altre estensioni sono saltati ed elencati nel report (`skipped_files`). Un file indicato esplicitamente con un'estensione non riconosciuta, senza `--input-format`, produce un errore di input.
+- **ING-3** Se lo stesso file è raggiunto più volte, dopo la risoluzione del percorso, viene analizzato una sola volta. Le sorgenti sono elaborate in ordine lessicografico di percorso, indipendentemente dall'ordine degli argomenti.
+- **ING-4** I file sono letti come UTF-8 e un eventuale BOM iniziale è ignorato. I byte non validi sono sostituiti con U+FFFD e l'evento riceve il problema `encoding.invalid`. Sono supportati i terminatori di riga LF e CRLF.
+- **ING-5** Le righe vuote o composte solo da spazi non sono né eventi né righe non interpretabili. Sono conteggiate come `blank_lines`.
+- **ING-6** Le righe non interpretabili non sono mai scartate in silenzio. Il report contiene:
+  - il totale;
+  - la ripartizione per motivo;
+  - i primi N esempi (percorso, riga, motivo ed estratto troncato a 200 caratteri), con N = `report.max_examples` (default 10).
+- **ING-7** Un file illeggibile (permessi, rimozione durante l'esecuzione, errore di I/O) è registrato nel report con il relativo errore e l'analisi prosegue sugli altri file. Se nessuna sorgente è leggibile, si verifica un errore di input.
+- **ING-8** Ogni evento conserva il percorso della sorgente e il numero di riga, che parte da 1.
+- **ING-9** Se in un file almeno il 50% delle righe non vuote è non interpretabile, il programma stampa su stderr un avviso che suggerisce di verificare il formato.
+
+### 2.2 Formato testuale v1 (`text`)
+
+Ogni riga ha questa struttura:
+
+```
+<timestamp> <LEVEL> [<service>] <message> [<key>=<value> ...]
+```
+
+| Elemento | Regola |
+|---|---|
+| Separatori | Uno o più spazi o tabulazioni. |
+| `timestamp` | Obbligatorio. Ha la forma `YYYY-MM-DD`, seguita da `T` o da uno spazio, seguita da `HH:MM:SS`. Può avere una frazione di secondo (`.` o `,`) e un fuso (`Z`, `±HH:MM` o `±HHMM`). Le ore vanno da 00 a 23, come in RFC 3339: `24:00:00` non è accettato (Python 3.14 lo accetterebbe, 3.12 e 3.13 no). |
+| `LEVEL` | Obbligatorio. È una parola tutta maiuscola (`[A-Z]+`), mappata secondo §2.4. Un valore non riconosciuto diventa `UNKNOWN` e il valore originale viene conservato. |
+| `[service]` | Opzionale. È il testo tra parentesi quadre (senza `]`), privo degli spazi esterni. `[]` equivale a nessun servizio. |
+| `message` | È tutto ciò che precede i campi finali e può essere vuoto (problema `message.missing`). |
+| Campi finali | Sono token `key=value` posti **in fondo** alla riga. La chiave rispetta `[a-z_][a-z0-9_.]*` e il valore è non vuoto e senza spazi. Un `key=value` seguito da altre parole resta nel messaggio. |
+| Chiavi riconosciute | `request_id`, `trace_id` e `duration_ms`. Le altre chiavi finiscono negli attributi. Se una chiave è duplicata, prevale l'ultima. |
+
+Una riga è non interpretabile per uno di questi motivi:
+
+- `no_match`: non rispetta la struttura;
+- `invalid_timestamp`: la forma è corretta ma la data non esiste, ad esempio `2026-02-30`.
+
+Esempi:
+
+| Riga | Esito |
+|---|---|
+| `2026-10-16T14:03:22.120Z INFO [api-gateway] POST /checkout request_id=req-184 trace_id=4bf92f35` | Evento `INFO`, servizio `api-gateway`, messaggio `POST /checkout`, con request_id e trace_id |
+| `2026-10-16 14:03:24,902 ERROR [payments] Gateway timeout duration_ms=2500` | Evento `ERROR` senza ID; il timestamp senza fuso è assunto UTC |
+| `2026-10-16T14:03:25Z WARN retry attempt=2 scheduled` | Evento `WARNING` senza servizio; `attempt=2` resta nel messaggio |
+| `2026-10-16T14:03:25Z NOTICE [db] vacuum done` | Evento `UNKNOWN` (valore originale `NOTICE`) |
+| `14:03:25 ERROR something` | Non interpretabile: `no_match` |
+| `2026-02-30T10:00:00Z ERROR [x] y` | Non interpretabile: `invalid_timestamp` |
+| `    at com.example.Foo.bar(Foo.java:42)` | Non interpretabile: `no_match` (continuazione multi-riga, §1.1) |
+
+### 2.3 Formato JSON Lines (`jsonl`)
+
+- **JL-1** Ogni riga non vuota deve contenere un oggetto JSON. Una riga è non interpretabile per uno di questi motivi:
+  - `invalid_json`: la sintassi non è valida, inclusa una nidificazione eccessiva;
+  - `not_an_object`: il JSON è valido ma non è un oggetto;
+  - `no_known_fields`: l'oggetto non contiene nessuno tra timestamp, livello e messaggio.
+- **JL-2** I campi si riconoscono tramite alias. Se ne sono presenti più di uno, vale il primo nell'ordine della tabella e gli altri restano negli attributi.
+
+  | Campo | Alias, in ordine di priorità |
+  |---|---|
+  | timestamp | `timestamp`, `@timestamp`, `ts`, `time` |
+  | livello | `level`, `severity`, `levelname`, `lvl` |
+  | messaggio | `message`, `msg` |
+  | servizio | `service`, `service_name`, `app` |
+  | request_id | `request_id`, `requestId`, `req_id` |
+  | trace_id | `trace_id`, `traceId` |
+  | duration_ms | `duration_ms`, `durationMs` |
+
+- **JL-3** I tipi sono convertiti secondo questa tabella. Un valore non accettato rende assente il campo e registra il problema `<campo>.invalid`.
+
+  | Campo | Valori accettati |
+  |---|---|
+  | timestamp | Stringa ISO 8601 con la stessa forma di §2.2. La parte oraria è obbligatoria: `2026-10-16` da solo non è valido. |
+  | livello | Stringa, senza distinzione tra maiuscole e minuscole. I livelli numerici, ad esempio `30`, diventano `UNKNOWN`. |
+  | messaggio | Stringa. Un valore non stringa è convertito in JSON compatto e registra `message.invalid`. |
+  | servizio | Stringa non vuota. |
+  | request_id, trace_id | Stringa, oppure intero convertito in stringa decimale. I booleani non sono accettati. |
+  | duration_ms | Numero o stringa numerica, finito e ≥ 0. I booleani, `NaN` e `Infinity` non sono accettati. |
+
+- **JL-4** I campi non riconosciuti finiscono negli attributi. I valori che non sono stringhe sono serializzati in JSON compatto con chiavi ordinate.
+- **JL-5** Se un timestamp manca o non è valido, l'evento viene comunque creato senza timestamp e con il problema `timestamp.missing` o `timestamp.invalid`.
+
+### 2.4 Normalizzazione dei campi
+
+**Livelli** (il formato testuale richiede il maiuscolo; il formato JSONL non distingue maiuscole e minuscole):
+
+| Canonico | Valori accettati | Rango |
+|---|---|---|
+| `TRACE` | trace | 5 |
+| `DEBUG` | debug | 10 |
+| `INFO` | info | 20 |
+| `WARNING` | warning, warn | 30 |
+| `ERROR` | error, err | 40 |
+| `CRITICAL` | critical, crit, fatal | 50 |
+| `UNKNOWN` | qualsiasi altro valore, oppure valore assente | 0 |
+
+Un evento è un *errore* se il suo livello è `ERROR` o `CRITICAL`. `UNKNOWN` non soddisfa mai una soglia di livello.
+
+**Timestamp.** Un timestamp con fuso è convertito in UTC. Un timestamp senza fuso è **assunto UTC** e registra il problema `timestamp.assumed_utc`. Internamente tutti i timestamp sono UTC. In output usano il formato RFC 3339 con `Z` e microsecondi.
+
+**Identificativi.** Gli spazi esterni sono rimossi. I seguenti valori equivalgono a un identificativo assente:
+
+- la stringa vuota;
+- `-`, `null`, `none` e `n/a`, senza distinzione tra maiuscole e minuscole;
+- le stringhe composte solo da zeri, come il trace id W3C non valido.
+
+`request_id: "abc"` e `trace_id: "abc"` sono identificativi distinti.
+
+**Servizio.** Gli spazi esterni sono rimossi. Una stringa vuota equivale a un servizio assente.
+
+### 2.5 Impronta dei messaggi
+
+Gli errori simili si raggruppano tramite un'impronta del messaggio. Le sostituzioni sono applicate in quest'ordine:
+
+1. UUID (`8-4-4-4-12` cifre esadecimali) → `<uuid>`
+2. IPv4, con porta opzionale → `<ip>`
+3. Token esadecimali di almeno 8 caratteri che contengono sia cifre sia lettere `a-f`, con prefisso `0x` opzionale → `<hex>`
+4. Ogni sequenza di cifre, con eventuale parte decimale → `<num>`
+5. Gli spazi consecutivi sono compressi e quelli esterni rimossi.
+
+Esempio: `Payment 7f3c9a12 failed after 2500 ms (attempt 3)` diventa `Payment <hex> failed after <num> ms (attempt <num>)`.
+
+L'impronta è idempotente: applicarla due volte dà lo stesso risultato. Le stringhe tra virgolette non sono normalizzate, perché gli apostrofi rendono la regola ambigua.
+
+---
+
+## 3. Correlazione e timeline
+
+- **COR-1** Due eventi appartengono allo stesso gruppo se condividono un `request_id` o un `trace_id`, direttamente o in modo transitivo: un gruppo è una componente connessa del grafo eventi–identificativi. Esempio: A (`req=1`, `trace=T`), B (`req=1`) e C (`trace=T`) formano un unico gruppo.
+- **COR-2** Gli eventi senza `request_id` e senza `trace_id` sono *non correlati*. Contribuiscono a statistiche, errori frequenti, latenze e picchi. Sono esclusi dalle regole di sequenza (RUL-3) e da `inspect`.
+- **COR-3** La timeline ordina gli eventi per timestamp. A parità di timestamp ordina per percorso della sorgente e poi per numero di riga. Gli eventi senza timestamp vanno in fondo e sono marcati.
+- **COR-4** A *precede* B se entrambi hanno un timestamp e vale una di queste condizioni:
+  - `A.ts < B.ts`;
+  - `A.ts == B.ts`, A e B provengono dalla stessa sorgente e la riga di A viene prima.
+
+  Se due sorgenti diverse riportano lo stesso timestamp, l'ordine è *indeterminato* e non conta come precedenza.
+- **COR-5** L'etichetta di un gruppo è il `trace_id` lessicograficamente minore. Se il gruppo non ha trace_id, è il `request_id` minore. Il report elenca comunque tutti gli identificativi del gruppo.
+- **COR-6** Un gruppo con più di 10 000 eventi genera un avviso di qualità dei dati, perché potrebbe indicare un identificativo riutilizzato.
+- **COR-7** Non esiste alcuna correlazione per vicinanza temporale o per contenuto del messaggio.
+
+L'ordine tra eventi di servizi diversi riflette i timestamp riportati, che possono essere affetti da sfasamento degli orologi. La CLI lo segnala nell'intestazione di `inspect`.
+
+---
+
+## 4. Regole diagnostiche
+
+Requisiti comuni a tutte le regole:
+
+- **RUL-0.1** Ogni regola è deterministica e documentata in questa sezione.
+- **RUL-0.2** Ogni finding contiene:
+  - `id`: stabile tra esecuzioni identiche;
+  - `rule`;
+  - `severity`;
+  - `title`;
+  - `description`;
+  - `evidence`: valori leggibili da un programma;
+  - `event_count`;
+  - `events`: al massimo `max_examples` riferimenti, per default 10, in ordine di timeline;
+  - `correlation_ids`: opzionale.
+- **RUL-0.3** Il report indica lo stato di ogni regola: `ok` oppure `skipped`, con un motivo (ad esempio `no_duration_data`).
+- **RUL-0.4** I finding sono ordinati per severità decrescente, poi per regola e poi per `id`.
+
+### RUL-1 `recurring_error` — errori ricorrenti
+
+| Aspetto | Comportamento |
+|---|---|
+| Input | Eventi con livello `ERROR` o `CRITICAL`. |
+| Raggruppamento | Per (servizio, impronta). Il servizio assente forma un gruppo a sé. |
+| Condizione | Il gruppo conta almeno `min_occurrences` eventi (default 3). |
+| Severità | `high` se il gruppo conta almeno `high_count` eventi (default 20) o contiene un `CRITICAL`; altrimenti `medium`. |
+| Evidenze | `service`, `fingerprint`, `count`, `min_occurrences`, `high_count`, `has_critical`, `first_seen`, `last_seen`, `correlation_groups` |
+
+Gli stessi gruppi alimentano anche la sezione `top_errors` del report (i primi `report.top_errors` gruppi) e il comando `top-errors` (i primi `--limit`). Entrambi mostrano i gruppi anche sotto soglia, ordinati per conteggio decrescente, poi per servizio e poi per impronta.
+
+### RUL-2 `high_latency` — latenze elevate
+
+| Aspetto | Comportamento |
+|---|---|
+| Input | Eventi con `duration_ms`. Le durate **non** sono mai ricavate dalla differenza tra timestamp, per via dello sfasamento degli orologi. |
+| Soglie | `warn_ms` (default 1000) e `critical_ms` (default 5000), sovrascrivibili per servizio. |
+| Condizione | Si produce un finding per ogni servizio con almeno un evento oltre `warn_ms`. |
+| Severità | `high` se almeno un evento supera `critical_ms`; altrimenti `medium`. |
+| Evidenze | `warn_ms`, `critical_ms`, `slow_events`, `measured_events`, `max_ms`, `p95_ms` (calcolato con il metodo nearest-rank sugli eventi misurati del servizio) |
+| Eventi | Dal più lento al più veloce, a parità di durata in ordine di timeline. |
+| Skip | `no_duration_data` se nessun evento ha `duration_ms`. |
+
+### RUL-3 `warning_before_error` — warning che precedono errori
+
+| Aspetto | Comportamento |
+|---|---|
+| Input | Gruppi di correlazione che contengono almeno un errore con timestamp. |
+| Algoritmo | Sia E il primo errore del gruppo secondo COR-3. I precursori sono gli eventi `WARNING` che precedono E secondo COR-4. Ogni coppia (servizio + impronta del warning, servizio + impronta dell'errore) è aggregata su tutti i gruppi. |
+| Condizione | La coppia compare in almeno un gruppo. |
+| Severità | `low`; `medium` se la coppia ricorre in almeno `medium_min_groups` gruppi (default 3). |
+| Descrizione | Ad esempio: "In 4 sequenze correlate il warning X precede l'errore Y. È una correlazione temporale, non una relazione causale dimostrata." |
+| Evidenze | `groups`, `median_gap_ms` (mediana dell'intervallo tra il warning e l'errore), `excluded_without_timestamp` |
+| Skip | `no_correlated_errors` se non esistono gruppi con errori. |
+
+### RUL-4 `error_spike` — picchi di errori
+
+| Aspetto | Comportamento |
+|---|---|
+| Finestre | Finestre fisse (*tumbling*) di `window_s` secondi (default 60), allineate all'epoch Unix in UTC. |
+| Intervallo | Va dalla finestra del primo evento con timestamp a quella dell'ultimo, considerando tutti i livelli. |
+| Riferimento | `baseline` è la mediana dei conteggi di errori su **tutte** le finestre dell'intervallo, incluse quelle a zero. |
+| Condizione | Una finestra è un picco se `errors ≥ max(min_errors, factor × baseline)`. I default sono `min_errors` = 5 e `factor` = 3.0. Le finestre di picco consecutive formano un unico finding. |
+| Severità | `high` se la finestra peggiore supera di almeno due volte la soglia; altrimenti `medium`. |
+| Evidenze | `window_s`, `start`, `end`, `errors`, `peak_window_errors`, `baseline`, `threshold` |
+| Skip | `insufficient_data` se l'intervallo copre meno di 3 finestre. |
+| Limiti noti | Una finestra fissa può spezzare un picco a cavallo di due finestre. Gli errori senza timestamp sono esclusi e conteggiati nelle evidenze. |
+
+---
+
+## 5. Interfaccia a riga di comando
+
+### 5.1 Comandi
+
+| Comando | Scopo | Scrive stato? |
+|---|---|---|
+| `log-tracer analyze PATH...` | Esegue l'analisi completa: riepilogo e finding. | Sì (§8) |
+| `log-tracer top-errors PATH...` | Mostra solo gli errori più frequenti. | No |
+| `log-tracer inspect ID [PATH...]` | Mostra la timeline del gruppo che contiene l'ID, cercato sia come request_id sia come trace_id. Senza PATH usa gli input dell'ultima analisi salvata. | No |
+| `log-tracer report` | Mostra o esporta il report dell'ultima analisi salvata, senza rieseguirla. | No |
+| `log-tracer --version` | Stampa la versione. | No |
+
+### 5.2 Opzioni
+
+| Opzione | Comandi | Significato |
+|---|---|---|
+| `--format text\|json` | tutti | Formato dello stdout. Il default è `text`. |
+| `--output FILE` | `analyze`, `report` | Scrive **anche** il report JSON su FILE, qualunque sia il valore di `--format`. |
+| `--input-format auto\|text\|jsonl` | `analyze`, `top-errors`, `inspect` | Forza il formato di input. Il default è `auto`, cioè per estensione. |
+| `--config FILE` | `analyze`, `top-errors` | File di configurazione TOML (§7). |
+| `--service NAME` | `analyze`, `top-errors` | Limita l'analisi a uno o più servizi. È ripetibile. |
+| `--since TS`, `--until TS` | `analyze`, `top-errors` | Limita l'analisi a un intervallo temporale (ISO 8601). Quando sono attivi, gli eventi senza timestamp sono esclusi e conteggiati. |
+| `--limit N` | `top-errors` | Numero di gruppi da mostrare. Il default è 10. |
+| `--fail-on low\|medium\|high` | `analyze` | Esce con codice 1 se esiste un finding di severità pari o superiore. |
+| `--no-save` | `analyze` | Non salva lo stato. |
+| `--state-dir DIR` | `analyze`, `inspect`, `report` | Directory dello stato. Il default è `.log-tracer`; si può impostare anche con la variabile `LOG_TRACER_STATE_DIR`. |
+
+I filtri `--service`, `--since` e `--until` definiscono il **perimetro dell'analisi**: le regole vedono solo gli eventi filtrati. Il report registra i filtri attivi.
+
+### 5.3 Contratto di output
+
+- **CLI-1** Lo stdout contiene solo l'output richiesto. Con `--format json` contiene esattamente un documento JSON valido in UTF-8, terminato da un newline.
+- **CLI-2** Avvisi, errori e suggerimenti vanno su stderr.
+- **CLI-3** I colori sono usati solo se l'output è un terminale. La variabile `NO_COLOR` è rispettata.
+- **CLI-4** Il contenuto dei log mostrato nel terminale è sempre trattato come testo: non è mai interpretato come markup di Rich né come sequenza di controllo del terminale. I caratteri di controllo sono sostituiti.
+- **CLI-5** Nell'output testuale i timestamp sono mostrati in UTC.
+- **CLI-6** Ogni messaggio d'errore indica cosa è successo e, quando possibile, come rimediare. Ad esempio: `No saved analysis in .log-tracer/. Run 'log-tracer analyze PATH' first.`
+
+### 5.4 Codici di uscita
+
+| Codice | Significato |
+|---|---|
+| 0 | Successo, anche quando ci sono finding o righe non interpretabili. |
+| 1 | È stata raggiunta la soglia di `--fail-on`. |
+| 2 | Errore d'uso o di configurazione: opzione non valida o file di configurazione non valido. |
+| 3 | Errore di input o di stato: percorso inesistente, nessun file supportato, nessuna sorgente leggibile, nessuna analisi salvata, report salvato incompatibile. |
+| 4 | `inspect`: identificativo non trovato. |
+| 70 | Errore interno, cioè un bug. Viene stampato un messaggio con il traceback su stderr. |
+
+---
+
+## 6. Report JSON
+
+- **REP-1** Il report è un oggetto JSON con le chiavi seguenti, sempre presenti e in quest'ordine:
+
+| Chiave | Contenuto |
+|---|---|
+| `schema_version` | Ad esempio `"1.0"`. Un consumatore deve verificare la versione maggiore. |
+| `tool` | `{ "name": "log-tracer", "version": "0.1.0" }` |
+| `generated_at` | Istante di generazione (RFC 3339, UTC). |
+| `config` | La configurazione effettiva usata (§7). |
+| `filters` | `services`, `since` e `until` attivi. |
+| `inputs` | Per ogni sorgente: `path`, `format`, `size_bytes`, `sha256`, `lines`, `blank_lines`, `events`, `unparsed`, `error`. |
+| `skipped_files` | Per ogni file saltato: `path` e `reason`. |
+| `summary` | `events`, `unparsed_lines`, `time_range` (`start` e `end`), `levels` (conteggio per ogni livello, inclusi quelli a zero), `correlation_groups`, `uncorrelated_events`, `findings_by_severity` |
+| `data_quality` | `unparsed_by_reason`, `unparsed_samples`, `field_issues` (conteggio per problema, ad esempio `timestamp.assumed_utc`), `warnings` |
+| `rules` | Per ogni regola: `rule`, `status` e `reason`. |
+| `top_errors` | Per ogni gruppo: `service`, `fingerprint`, `count`, `first_seen`, `last_seen`, `events`. |
+| `findings` | Elenco dei finding (§4). |
+
+- **REP-2** Gli eventi sono riferiti come `{"path": …, "line": …}`. Il report non contiene il contenuto integrale dei log, fatta eccezione per gli estratti delle righe non interpretabili.
+- **REP-3** I percorsi sono riportati come forniti dall'utente, in notazione POSIX. Il report non aggiunge percorsi assoluti che potrebbero esporre informazioni locali.
+- **REP-4** Per lo stesso input e la stessa configurazione, due report differiscono solo in `generated_at`.
+
+---
+
+## 7. Configurazione
+
+- **CFG-1** Le soglie si configurano con un file TOML passato con `--config`. Il programma non cerca file di configurazione in modo implicito.
+- **CFG-2** Le chiavi sconosciute e i valori non validi (negativi, zero dove serve un valore positivo, tipo errato) producono un errore di configurazione (codice 2) che indica la chiave interessata.
+- **CFG-3** La precedenza è: valori di default, poi file di configurazione. I filtri CLI non sono configurazione e sono registrati a parte nel report.
+
+| Chiave | Default |
+|---|---|
+| `report.max_examples` | 10 |
+| `report.top_errors` | 10 |
+| `recurring_error.min_occurrences` | 3 |
+| `recurring_error.high_count` | 20 |
+| `high_latency.warn_ms` | 1000 |
+| `high_latency.critical_ms` | 5000 |
+| `high_latency.services.<nome>.warn_ms` / `.critical_ms` | — |
+| `warning_before_error.medium_min_groups` | 3 |
+| `error_spike.window_s` | 60 |
+| `error_spike.factor` | 3.0 |
+| `error_spike.min_errors` | 5 |
+
+```toml
+[high_latency]
+warn_ms = 800
+
+[high_latency.services.payments]
+warn_ms = 2000
+critical_ms = 8000
+```
+
+---
+
+## 8. Stato persistente
+
+- **STA-1** Al termine, `analyze` salva il report JSON in `<state-dir>/last-report.json` con una scrittura atomica (file temporaneo seguito da rename), a meno che sia indicato `--no-save`. Alla prima scrittura crea `<state-dir>/.gitignore` con contenuto `*`.
+- **STA-2** `report` legge `last-report.json` e non rianalizza i log. Se il file manca, termina con codice 3 e un suggerimento. Se la versione maggiore dello schema è incompatibile, termina con codice 3.
+- **STA-3** Senza PATH, `inspect` rilegge le sorgenti elencate in `inputs` del report salvato, risolvendole rispetto alla directory corrente. Se lo sha256 di una sorgente è cambiato, stampa un avviso su stderr. Se una sorgente non esiste più, termina con codice 3.
+- **STA-4** Solo `analyze` scrive lo stato.
+
+---
+
+## 9. Gestione degli errori
+
+| Situazione | Comportamento | Dove è visibile | Codice |
+|---|---|---|---|
+| Percorso inesistente | Si ferma prima dell'analisi | stderr | 3 |
+| Directory senza file supportati | Si ferma ed elenca i file saltati | stderr | 3 |
+| File esplicito con estensione non riconosciuta | Si ferma e suggerisce `--input-format` | stderr | 3 |
+| Un file illeggibile tra diversi file | Prosegue | stderr e `inputs[].error` | 0 |
+| Nessuna sorgente leggibile | Si ferma | stderr | 3 |
+| File vuoto | Zero eventi; il report è valido | report | 0 |
+| Riga che non rispetta il formato | Riga non interpretabile `no_match` | `data_quality` | 0 |
+| JSON malformato o troppo annidato | Riga non interpretabile `invalid_json` | `data_quality` | 0 |
+| Timestamp assente o non valido (JSONL) | Evento senza timestamp | `data_quality.field_issues` | 0 |
+| Timestamp senza fuso | Assunto UTC | `data_quality.field_issues` | 0 |
+| Livello sconosciuto | `UNKNOWN`, con il valore originale conservato | `summary.levels` | 0 |
+| Identificativi mancanti | Evento non correlato | `summary.uncorrelated_events` | 0 |
+| `duration_ms` non valido | Campo assente | `data_quality.field_issues` | 0 |
+| Opzione o configurazione non valida | Si ferma | stderr | 2 |
+| Nessuna analisi salvata | Si ferma con un suggerimento | stderr | 3 |
+| ID non trovato in `inspect` | Si ferma con un messaggio | stderr | 4 |
+| Errore inatteso | Messaggio e traceback | stderr | 70 |
+
+Gli errori di contenuto (righe e campi) non interrompono mai l'analisi. Gli errori d'ambiente (percorsi, permessi, configurazione) la interrompono solo quando non resta nulla di sensato da analizzare.
+
+---
+
+## 10. Requisiti non funzionali
+
+- **NFR-1 Offline.** Nessun accesso alla rete. I test lo verificano bloccando i socket.
+- **NFR-2 Determinismo.** A parità di input e configurazione, il risultato è identico tranne `generated_at`, indipendentemente dall'ordine degli argomenti e dall'ordine in cui il filesystem restituisce i file.
+- **NFR-3 Prestazioni (indicative).** 100 000 righe (circa 15 MB) dovrebbero essere analizzate in meno di 10 secondi su un portatile recente, con memoria lineare nel numero di eventi. La misura è documentata in `docs/demo.md` e non è un vincolo della CI.
+- **NFR-4 Portabilità.** Python 3.12, 3.13 e 3.14, su Linux, macOS e Windows.
+- **NFR-5 Dipendenze.** A runtime le sole dipendenze sono `typer` e `rich`.
+- **NFR-6 Qualità statica.** `ruff check` e `ruff format --check` non segnalano problemi; `mypy --strict` non segnala errori.
+- **NFR-7 Robustezza.** Nessun contenuto di riga può causare un'eccezione non gestita. È verificato con test basati su proprietà.
+- **NFR-8 Copertura.** La copertura dei rami è misurata, con una soglia minima dell'85% che serve contro le regressioni e non come obiettivo.
+
+---
+
+## 11. Criteri di accettazione v0.1.0
+
+| # | Criterio | Verifica |
+|---|---|---|
+| A1 | Si installa seguendo il README | Job CI `package`: build della wheel, installazione in un ambiente pulito, `log-tracer --version` |
+| A2 | Analizza `text` e `jsonl` | Test d'integrazione su `examples/` |
+| A3 | Normalizza in modo coerente | Test unitari parametrizzati per ING, JL e §2.4 |
+| A4 | Esegue le 4 regole documentate | Test unitari per RUL-1…4, inclusi i casi di skip |
+| A5 | Produce un riepilogo testuale e un JSON valido | Test e2e: `json.loads(stdout)` e confronto con `examples/expected_report.json` |
+| A6 | Gestisce gli input malformati come da §9 | Test e2e per ogni riga della tabella |
+| A7 | La suite di test è verde | `pytest` in CI su tutta la matrice |
+| A8 | Lint e tipi senza errori | `ruff check`, `ruff format --check`, `mypy --strict` in CI |
+| A9 | CI funzionante | Workflow verde su GitHub |
+| A10 | Demo riproducibile | `docs/demo.md` con comandi eseguibili su `examples/` |
+| A11 | Nessuna dipendenza remota | NFR-1 e nessuna credenziale richiesta |
+
+---
+
+## 12. Decisioni e assunzioni
+
+| ID | Decisione | Motivazione | Alternativa scartata |
+|---|---|---|---|
+| D-1 | Il formato testuale è definito da noi (§2.2) | La specifica richiede un formato esplicito; i campi `key=value` finali sono comuni e facili da analizzare senza ambiguità. | Supportare più formati diffusi (Apache, syslog): più lavoro, poco valore dimostrativo nella v0.1. |
+| D-2 | Il formato si sceglie per estensione, con `--input-format` per forzarlo | È prevedibile e spiegabile. | Riconoscimento dal contenuto: euristico e con errori silenziosi. |
+| D-3 | Un timestamp senza fuso è assunto UTC, con un problema di campo | Rende confrontabili tutti i timestamp; l'assunzione è tracciata. | Timestamp naive come "non confrontabili": complica ogni regola. |
+| D-4 | Nel testo un timestamp non valido rende la riga non interpretabile; in JSONL l'evento resta, senza timestamp | Nel testo il timestamp è l'àncora che identifica il formato; in JSONL la struttura è data dal JSON. | Un'unica regola per entrambi i formati. |
+| D-5 | La correlazione usa le componenti connesse su request_id e trace_id | Gestisce i log misti (il gateway registra solo request_id, i servizi entrambi). | Precedenza `trace_id` > `request_id`: spezza le sequenze miste. |
+| D-6 | Le durate vengono solo da `duration_ms`, mai dai timestamp | Lo sfasamento degli orologi tra servizi rende inaffidabili le differenze. | Calcolare la durata di un gruppo come ultimo − primo evento. |
+| D-7 | `analyze` salva il report; `report` lo rilegge; `inspect` rilegge le sorgenti | Il report è già l'artefatto richiesto e non serve un secondo formato di persistenza. Gli eventi completi non sono salvati. | (a) Comandi senza stato con PATH obbligatorio; (b) salvare solo l'elenco degli input e ricalcolare ogni volta. |
+| D-8 | Le soglie si leggono solo da un file TOML esplicito | `tomllib` è nella libreria standard; nessuna configurazione implicita. | Ricerca automatica di `log-tracer.toml` o `pyproject.toml`. |
+| D-9 | I filtri CLI restringono il perimetro dell'analisi | La semantica è unica e chiara; il report registra i filtri. | Filtri solo di visualizzazione, che confondono quando il JSON non coincide con l'output testuale. |
+| D-10 | Nessun filtro `--level` in `analyze` | Escludere i WARNING annullerebbe RUL-3. | — |
+
+## 13. Questioni aperte
+
+| ID | Domanda | Proposta |
+|---|---|---|
+| Q-1 | Lingua di README e documentazione: italiano o inglese? | Codice e CLI in inglese. Documentazione in italiano per ora; un README in inglese è consigliabile per il portfolio. |
+| Q-2 | Supporto multi-riga nel formato testuale? | Escluso nella v0.1.0. Nella v0.2 si potrebbero considerare continuazione le righe che iniziano con spazio o tab. |
+| Q-3 | Report HTML? | Solo dopo il completamento di tutti i criteri di §11. |
