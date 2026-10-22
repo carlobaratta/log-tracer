@@ -5,12 +5,12 @@ listed even when its count is zero, and timestamps are RFC 3339 in UTC. The
 same report therefore always produces the same bytes (NFR-2).
 """
 
-import dataclasses
 import json
 from collections import Counter
 from datetime import UTC, datetime
 from typing import Final
 
+from log_tracer.config import AnalysisConfig
 from log_tracer.models import (
     CorrelationGroup,
     DataWarning,
@@ -105,7 +105,7 @@ def report_to_dict(report: Report) -> JsonObject:
         "schema_version": SCHEMA_VERSION,
         "tool": {"name": TOOL_NAME, "version": report.tool_version},
         "generated_at": format_timestamp(report.generated_at),
-        "config": dataclasses.asdict(report.config),
+        "config": _config(report.config),
         "inputs": [_source(source) for source in ingestion.sources],
         "skipped_files": [_skipped(skipped) for skipped in ingestion.skipped],
         "summary": _summary(report),
@@ -189,6 +189,31 @@ def _unparsed(sample: UnparsedLine) -> JsonObject:
         "line": sample.ref.line,
         "reason": sample.reason.value,
         "excerpt": sample.excerpt,
+    }
+
+
+def _config(config: AnalysisConfig) -> JsonObject:
+    """The effective configuration, written explicitly rather than with
+    ``dataclasses.asdict``: that fails on read-only mappings, and an explicit
+    encoder keeps the service order stable (alphabetical)."""
+    latency = config.high_latency
+    return {
+        "report": {
+            "max_examples": config.report.max_examples,
+            "top_errors": config.report.top_errors,
+        },
+        "recurring_error": {
+            "min_occurrences": config.recurring_error.min_occurrences,
+            "high_count": config.recurring_error.high_count,
+        },
+        "high_latency": {
+            "warn_ms": latency.warn_ms,
+            "critical_ms": latency.critical_ms,
+            "services": {
+                name: {"warn_ms": thresholds.warn_ms, "critical_ms": thresholds.critical_ms}
+                for name, thresholds in sorted(latency.services.items())
+            },
+        },
     }
 
 

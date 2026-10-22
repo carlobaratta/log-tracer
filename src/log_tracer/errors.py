@@ -25,3 +25,7 @@ class OutputError(LogTracerError):
 
 class NotFoundError(LogTracerError):
     """The identifier given to ``inspect`` does not appear in the logs."""
+
+
+class ConfigError(LogTracerError):
+    """The configuration file cannot be read or contains an invalid value."""

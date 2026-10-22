@@ -102,7 +102,7 @@ Rispetto alla struttura suggerita dalla specifica iniziale ci sono quattro diffe
 | Modulo | Responsabilità | Non deve |
 |---|---|---|
 | `models` | Definire i tipi del dominio (eventi, risultati, report) | Contenere logica di parsing, analisi o formattazione |
-| `config` | Valori di default, caricamento TOML (`tomllib`), validazione → `ConfigError` | Leggere opzioni della CLI o variabili d'ambiente |
+| `config` | Valori di default, caricamento TOML (`tomllib`), validazione → `ConfigError`. `parse_config()` valida dati già letti e si può testare senza file; `load_config()` aggiunge solo la lettura | Leggere opzioni della CLI o variabili d'ambiente |
 | `errors` | `LogTracerError` → `InputError`, `ConfigError`, `StateError` | Conoscere i codici di uscita |
 | `ingestion.discovery` | Espandere i percorsi, dedurre il formato, ordinare, deduplicare (ING-1…3) | Leggere il contenuto dei file |
 | `ingestion.reader` | Produrre righe `(numero, testo)`, gestire la codifica (ING-4) e calcolare sha256 e dimensione in un'unica lettura | Interpretare le righe |
@@ -484,6 +484,7 @@ tests/
 | T-6 | Test di architettura con `ast` | Circa 40 righe, nessuna dipendenza | `import-linter` |
 | T-7 | Python 3.12+ come requisito minimo e codice scritto per 3.12 | Imposto dalla specifica; la CI verifica 3.12, 3.13 e 3.14 | — |
 | T-8 | Console Rich create a ogni stampa, con `markup`, `emoji` e `highlight` disattivati; `soft_wrap` su stderr | Rich interpreta `[bold]` e `:warning:` nelle stringhe, colora i numeri sui terminali e manda a capo a 80 colonne su stderr: l'output dipenderebbe dal contenuto dei log e dal terminale. Creandole al momento della stampa si leggono `NO_COLOR`, `COLUMNS` e le redirezioni correnti. | Una console globale configurata all'avvio |
+| T-10 | La configurazione è scritta nel report da un codificatore esplicito, non da `dataclasses.asdict` | `asdict` fallisce sulle mappe in sola lettura (`MappingProxyType`, verificato) usate per le soglie per servizio; il codificatore esplicito fissa anche l'ordine alfabetico dei servizi | `asdict` con mappe modificabili, rinunciando all'immutabilità |
 | T-9 | `main()` imposta stdout e stderr in UTF-8 con `reconfigure` | Su Windows l'output rediretto usa cp1252: un carattere come `→` faceva fallire la stampa con `UnicodeEncodeError` (verificato con `PYTHONIOENCODING=cp1252`). | Sostituire i caratteri non rappresentabili, che altererebbe il contenuto dei log |
 
 Dipendenze:

@@ -182,6 +182,7 @@ class Severity(enum.IntEnum):
 
 class RuleName(enum.StrEnum):
     RECURRING_ERROR = "recurring_error"
+    HIGH_LATENCY = "high_latency"
 
 
 @dataclass(frozen=True, slots=True)

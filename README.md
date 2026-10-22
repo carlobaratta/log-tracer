@@ -2,7 +2,7 @@
 
 Log Tracer is a local, offline command-line tool for analyzing log files. It reads them, normalizes every line into a common event model, and reports recurring problems with deterministic, documented rules. The same input and configuration always produce the same report. It needs no network access, credentials, or external services.
 
-> **Status: early development (increment 4 of 10).** Today Log Tracer reads text and JSON Lines logs, from single files or whole directories, correlates events by `request_id` and `trace_id`, shows the timeline of a request, and reports recurring errors in the terminal or as JSON. Configuration files and the remaining rules come in later increments. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
+> **Status: early development (increment 5 of 10).** Today Log Tracer reads text and JSON Lines logs, from single files or whole directories, correlates events by `request_id` and `trace_id`, shows the timeline of a request, and reports recurring errors and high latencies, in the terminal or as JSON, with thresholds you can configure. The remaining rules (warnings before errors, error spikes) come in later increments. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
 
 ## Requirements
 
@@ -33,6 +33,7 @@ log-tracer analyze examples/logs/ --output report.json    # summary, and the JSO
 log-tracer analyze app.log worker.jsonl                   # explicit files
 log-tracer analyze service.log --input-format jsonl       # JSON Lines in a .log file
 log-tracer analyze logs/ --fail-on high                   # exit code 1 if a finding is high
+log-tracer analyze logs/ --config log-tracer.toml         # custom thresholds
 log-tracer top-errors examples/logs/ --limit 5            # the most frequent errors only
 log-tracer inspect req-184 examples/logs/                 # timeline of one request or trace
 ```
@@ -84,13 +85,42 @@ Sequence 4bf92f3577b34da6 · 6 events · 4 services · 2.790 s
 
 Identifiers are matched exactly, including upper and lower case. Events are only ever linked through identifiers, never because they are close in time. The order across services follows the timestamps each service wrote, so it is a diagnostic hint, not proof of causality.
 
+### Configuration
+
+Thresholds come from a TOML file passed with `--config`. Nothing is read implicitly. Every key is optional and defaults to the value in [SPEC.md §7](SPEC.md#7-configurazione):
+
+```toml
+[report]
+max_examples = 10          # event references per finding
+top_errors = 10            # error groups in the report (top-errors --limit overrides it)
+
+[recurring_error]
+min_occurrences = 3        # an error pattern seen this often is a finding
+high_count = 20            # ...and a high-severity one from this count
+
+[high_latency]
+warn_ms = 1000             # durations strictly above this are slow
+critical_ms = 5000         # strictly above this, the finding is high
+
+[high_latency.services.payments]
+warn_ms = 3000             # per-service thresholds; missing ones are inherited
+```
+
+The file is validated strictly, before any log is read. An unknown key, a value of the wrong type or an inconsistent pair (such as `critical_ms` not above `warn_ms`) stops the command with exit code 2 and names the key:
+
+```
+Error: log-tracer.toml: unknown key 'high_latency.warn' (did you mean 'warn_ms'?)
+```
+
+`examples/log-tracer.toml` shows per-service thresholds on the bundled logs.
+
 ### Exit codes
 
 | Code | Meaning |
 |---|---|
 | 0 | Analysis completed, even if there are findings or unparsable lines |
 | 1 | `--fail-on` was given and a finding reached that severity |
-| 2 | Invalid command-line usage |
+| 2 | Invalid command-line usage, or invalid `--config` file |
 | 3 | Input or output error: missing path, unsupported file type, directory without supported files, no readable file, `--output` file not writable |
 | 4 | `inspect`: no event has that `request_id` or `trace_id` |
 | 70 | Internal error, which is a bug. A traceback is printed on stderr |

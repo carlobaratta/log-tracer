@@ -28,6 +28,18 @@ def report_of(result: Result) -> dict[str, Any]:
     return data
 
 
+def latency_row(finding: dict[str, Any]) -> tuple[object, ...]:
+    evidence = finding["evidence"]
+    return (
+        evidence["service"],
+        evidence["slow_events"],
+        evidence["measured_events"],
+        evidence["max_ms"],
+        evidence["p95_ms"],
+        finding["severity"],
+    )
+
+
 @pytest.fixture
 def in_repo(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(ROOT)
@@ -76,12 +88,20 @@ def test_sample_log_produces_the_expected_report() -> None:
         }
     ]
 
+    findings = report["findings"]
     assert {
         (f["evidence"]["service"], f["evidence"]["fingerprint"], f["severity"])
-        for f in report["findings"]
+        for f in findings
+        if f["rule"] == "recurring_error"
     } == {
         ("payments", "Payment gateway timeout after <num> ms", "medium"),
         ("api-gateway", "POST /checkout failed", "medium"),
+    }
+    # RUL-2 with the default thresholds (1000 / 5000 ms), computed from the file by hand.
+    assert {latency_row(f) for f in findings if f["rule"] == "high_latency"} == {
+        ("api-gateway", 4, 5, 2797.0, 2797.0, "medium"),
+        ("payments", 3, 4, 2500.0, 2500.0, "medium"),
+        ("orders-db", 1, 1, 1840.0, 1840.0, "medium"),
     }
     assert [(g["service"], g["count"]) for g in report["top_errors"]] == [
         ("api-gateway", 3),
@@ -171,8 +191,17 @@ def test_examples_directory_combines_text_and_json_lines() -> None:
         ("scheduler", 2),
     ]
     assert ("inventory", "Stock sync with warehouse failed: HTTP <num>") in {
-        (f["evidence"]["service"], f["evidence"]["fingerprint"]) for f in report["findings"]
+        (f["evidence"]["service"], f["evidence"]["fingerprint"])
+        for f in report["findings"]
+        if f["rule"] == "recurring_error"
     }
+    assert {latency_row(f) for f in report["findings"] if f["rule"] == "high_latency"} == {
+        ("api-gateway", 4, 5, 2797.0, 2797.0, "medium"),
+        ("payments", 3, 4, 2500.0, 2500.0, "medium"),
+        ("inventory", 1, 4, 1320.0, 1320.0, "medium"),
+        ("orders-db", 1, 1, 1840.0, 1840.0, "medium"),
+    }
+    assert len(report["findings"]) == 7
 
 
 def test_input_format_reads_a_log_file_as_json_lines(in_tmp: Path) -> None:
@@ -346,7 +375,13 @@ def test_text_summary_of_the_examples() -> None:
     lines = [line.strip() for line in out.splitlines()]
     assert lines[0] == "Log Tracer 0.1.0 · 2 files · 34 events · 3 unparsed lines"
     assert "Time range (UTC): 2026-10-16T14:03:21.004Z → 2026-10-16T14:06:02.011Z" in lines
-    assert "Findings (3)" in lines
+    assert "Findings (7)" in lines
+    assert [
+        "medium",
+        "high_latency",
+        "High latency in api-gateway: 4 of 5 measured events over 1000 ms",
+        "4",
+    ] in cells(out)
     assert [
         "medium",
         "recurring_error",
@@ -417,7 +452,7 @@ def test_fail_on_exits_with_code_1_after_printing_the_output(threshold: str) -> 
     assert result.exit_code == 1
     assert result.stdout.startswith("Log Tracer")
     assert result.stderr == (
-        f"Found 3 findings with severity {threshold} or higher (--fail-on {threshold})\n"
+        f"Found 7 findings with severity {threshold} or higher (--fail-on {threshold})\n"
     )
 
 
@@ -425,7 +460,7 @@ def test_fail_on_exits_with_code_1_after_printing_the_output(threshold: str) -> 
 def test_fail_on_keeps_stdout_valid_json() -> None:
     result = invoke("analyze", "examples/logs", "--format", "json", "--fail-on", "medium")
     assert result.exit_code == 1
-    assert len(json.loads(result.stdout)["findings"]) == 3
+    assert len(json.loads(result.stdout)["findings"]) == 7
 
 
 @pytest.mark.usefixtures("in_repo")
@@ -438,3 +473,75 @@ def test_fail_on_below_the_threshold_exits_with_code_0() -> None:
 def test_unknown_fail_on_value_is_a_usage_error(in_tmp: Path) -> None:
     (in_tmp / "app.log").write_text("", encoding="utf-8")
     assert invoke("analyze", "app.log", "--fail-on", "critical").exit_code == 2
+
+
+# --- Configuration file (SPEC §7) ------------------------------------------------------
+
+
+@pytest.mark.usefixtures("in_repo")
+def test_configuration_file_changes_the_thresholds() -> None:
+    result = invoke(
+        "analyze", "examples/logs", "--config", "examples/log-tracer.toml", "--format", "json"
+    )
+    report = report_of(result)
+    # payments: warn_ms 3000 -> no slow event; api-gateway: critical_ms 2700 -> high.
+    assert {latency_row(f) for f in report["findings"] if f["rule"] == "high_latency"} == {
+        ("api-gateway", 4, 5, 2797.0, 2797.0, "high"),
+        ("inventory", 1, 4, 1320.0, 1320.0, "medium"),
+        ("orders-db", 1, 1, 1840.0, 1840.0, "medium"),
+    }
+    assert len(report["findings"]) == 6
+    assert report["config"]["high_latency"]["services"] == {
+        "api-gateway": {"warn_ms": 1000, "critical_ms": 2700},
+        "payments": {"warn_ms": 3000, "critical_ms": 5000},
+    }
+
+
+@pytest.mark.usefixtures("in_repo")
+def test_fail_on_high_with_the_example_configuration() -> None:
+    result = invoke(
+        "analyze", "examples/logs", "--config", "examples/log-tracer.toml", "--fail-on", "high"
+    )
+    assert result.exit_code == 1
+    assert result.stderr == "Found 1 finding with severity high or higher (--fail-on high)\n"
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        (
+            "[high_latency]\nwarn = 10\n",
+            "Error: cfg.toml: unknown key 'high_latency.warn' (did you mean 'warn_ms'?)\n",
+        ),
+        (
+            "[high_latency]\nwarn_ms = 6000\n",
+            "Error: cfg.toml: high_latency.critical_ms (5000) must be greater than "
+            "high_latency.warn_ms (6000)\n",
+        ),
+        (
+            "[report]\nmax_examples = \n",
+            "Error: cfg.toml: invalid TOML: Invalid value (at line 2, column 16)\n",
+        ),
+    ],
+)
+def test_invalid_configuration_exits_with_code_2(in_tmp: Path, content: str, message: str) -> None:
+    (in_tmp / "app.log").write_text("2026-10-16T14:00:00Z INFO [api] ok\n", encoding="utf-8")
+    (in_tmp / "cfg.toml").write_text(content, encoding="utf-8")
+    result = invoke("analyze", "app.log", "--config", "cfg.toml")
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert result.stderr == message
+
+
+def test_missing_configuration_file_exits_with_code_2(in_tmp: Path) -> None:
+    (in_tmp / "app.log").write_text("2026-10-16T14:00:00Z INFO [api] ok\n", encoding="utf-8")
+    result = invoke("analyze", "app.log", "--config", "nope.toml")
+    assert result.exit_code == 2
+    assert result.stderr == "Error: configuration file not found: nope.toml\n"
+
+
+def test_configuration_is_checked_before_reading_the_logs(in_tmp: Path) -> None:
+    (in_tmp / "cfg.toml").write_text("[bogus]\n", encoding="utf-8")
+    result = invoke("analyze", "missing.log", "--config", "cfg.toml")
+    assert result.exit_code == 2
+    assert result.stderr.startswith("Error: cfg.toml: unknown key 'bogus'")

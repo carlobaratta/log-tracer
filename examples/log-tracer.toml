@@ -1,0 +1,14 @@
+# Example configuration for the bundled logs (see SPEC §7).
+# Use it with: log-tracer analyze examples/logs/ --config examples/log-tracer.toml
+
+[high_latency]
+warn_ms = 1000
+critical_ms = 5000
+
+# The payment provider is slow by design: only calls above 3 s are unusual.
+[high_latency.services.payments]
+warn_ms = 3000
+
+# The gateway's own budget: a checkout above 2.7 s is critical.
+[high_latency.services.api-gateway]
+critical_ms = 2700

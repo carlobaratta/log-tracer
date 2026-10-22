@@ -136,7 +136,10 @@ def test_analyze_reports_rule_status_and_top_errors() -> None:
     config = AnalysisConfig()
     events = [*errors(3, service="a"), make_event(level=Level.INFO)]
     result = analyze(events, config)
-    assert [(o.rule, o.status) for o in result.rules] == [(RuleName.RECURRING_ERROR, "ok")]
+    assert [(o.rule, o.status) for o in result.rules] == [
+        (RuleName.RECURRING_ERROR, "ok"),
+        (RuleName.HIGH_LATENCY, "skipped"),  # no event has a duration
+    ]
     assert [(g.service, g.count) for g in result.top_errors] == [("a", 3)]
     assert result.level_counts == {Level.ERROR: 3, Level.INFO: 1}
 

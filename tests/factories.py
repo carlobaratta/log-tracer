@@ -132,6 +132,7 @@ def make_report(
     correlation_groups: int = 0,
     uncorrelated_events: int = 0,
     analysis_warnings: tuple[DataWarning, ...] = (),
+    config: AnalysisConfig | None = None,
 ) -> Report:
     """A small but complete report; every part can be replaced by a test."""
     if evidence is not None:
@@ -141,7 +142,7 @@ def make_report(
     return Report(
         tool_version="0.1.0",
         generated_at=T0,
-        config=AnalysisConfig(),
+        config=AnalysisConfig() if config is None else config,
         ingestion=IngestionSummary(
             sources=sources,
             skipped=skipped,

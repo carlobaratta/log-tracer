@@ -81,3 +81,4 @@ jobs:
           /tmp/smoke/bin/log-tracer analyze examples/logs/
           /tmp/smoke/bin/log-tracer top-errors examples/logs/ --limit 3
           /tmp/smoke/bin/log-tracer inspect req-184 examples/logs/
+          /tmp/smoke/bin/log-tracer analyze examples/logs/ --config examples/log-tracer.toml

@@ -128,3 +128,13 @@ def test_input_format_and_warnings(in_tmp: Path) -> None:
     assert as_json(default)["top_errors"] == []
     forced = as_json(invoke("app.log", "--format", "json", "--input-format", "jsonl"))
     assert [g["fingerprint"] for g in forced["top_errors"]] == ["boom"]
+
+
+@pytest.mark.usefixtures("in_repo")
+def test_report_top_errors_from_the_configuration_is_the_default_limit(tmp_path: Path) -> None:
+    config = tmp_path / "cfg.toml"
+    config.write_text("[report]\ntop_errors = 2\n", encoding="utf-8")
+    from_file = as_json(invoke("examples/logs", "--format", "json", "--config", str(config)))
+    assert len(from_file["top_errors"]) == 2
+    flag_wins = invoke("examples/logs", "--format", "json", "--config", str(config), "--limit", "3")
+    assert len(as_json(flag_wins)["top_errors"]) == 3

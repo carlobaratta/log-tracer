@@ -262,11 +262,11 @@ Gli stessi gruppi alimentano anche la sezione `top_errors` del report (i primi `
 | Aspetto | Comportamento |
 |---|---|
 | Input | Eventi con `duration_ms`. Le durate **non** sono mai ricavate dalla differenza tra timestamp, per via dello sfasamento degli orologi. |
-| Soglie | `warn_ms` (default 1000) e `critical_ms` (default 5000), sovrascrivibili per servizio. |
-| Condizione | Si produce un finding per ogni servizio con almeno un evento oltre `warn_ms`. |
-| Severità | `high` se almeno un evento supera `critical_ms`; altrimenti `medium`. |
-| Evidenze | `warn_ms`, `critical_ms`, `slow_events`, `measured_events`, `max_ms`, `p95_ms` (calcolato con il metodo nearest-rank sugli eventi misurati del servizio) |
-| Eventi | Dal più lento al più veloce, a parità di durata in ordine di timeline. |
+| Soglie | `warn_ms` (default 1000) e `critical_ms` (default 5000), sovrascrivibili per servizio (§7). Gli eventi senza servizio usano le soglie globali e formano un gruppo a sé. |
+| Condizione | Si produce un finding per ogni servizio con almeno un evento la cui durata è **strettamente maggiore** di `warn_ms`: una durata uguale alla soglia non è lenta. |
+| Severità | `high` se almeno un evento ha durata strettamente maggiore di `critical_ms`; altrimenti `medium`. |
+| Evidenze | `service`, `warn_ms`, `critical_ms` (le soglie effettive del servizio), `slow_events`, `measured_events`, `max_ms`, `p95_ms`. Il p95 è calcolato con il metodo *nearest-rank* su tutti gli eventi misurati del servizio: è il valore in posizione ⌈0,95·n⌉ fra le durate ordinate, quindi sempre un valore osservato. |
+| Eventi | Solo gli eventi lenti, dal più lento al più veloce, a parità di durata in ordine di timeline. `correlation_ids` contiene le sequenze di questi eventi, nello stesso ordine. |
 | Skip | `no_duration_data` se nessun evento ha `duration_ms`. |
 
 ### RUL-3 `warning_before_error` — warning che precedono errori
@@ -360,7 +360,7 @@ I filtri `--service`, `--since` e `--until` definiscono il **perimetro dell'anal
 | `schema_version` | Ad esempio `"1.0"`. Un consumatore deve verificare la versione maggiore. |
 | `tool` | `{ "name": "log-tracer", "version": "0.1.0" }` |
 | `generated_at` | Istante di generazione (RFC 3339, UTC). |
-| `config` | La configurazione effettiva usata (§7). |
+| `config` | La configurazione effettiva usata (§7), dopo l'unione di default e file; le soglie per servizio sono già unite a quelle globali ed elencate in ordine alfabetico. |
 | `filters` | `services`, `since` e `until` attivi. |
 | `inputs` | Per ogni sorgente: `path`, `format`, `size_bytes`, `sha256`, `lines`, `blank_lines`, `events`, `unparsed`, `error`. |
 | `skipped_files` | Per ogni file saltato: `path` e `reason` (ING-1), in ordine di percorso. |
@@ -381,8 +381,16 @@ I filtri `--service`, `--since` e `--until` definiscono il **perimetro dell'anal
 ## 7. Configurazione
 
 - **CFG-1** Le soglie si configurano con un file TOML passato con `--config`. Il programma non cerca file di configurazione in modo implicito.
-- **CFG-2** Le chiavi sconosciute e i valori non validi (negativi, zero dove serve un valore positivo, tipo errato) producono un errore di configurazione (codice 2) che indica la chiave interessata.
-- **CFG-3** La precedenza è: valori di default, poi file di configurazione. I filtri CLI non sono configurazione e sono registrati a parte nel report.
+- **CFG-2** Le chiavi sconosciute e i valori non validi producono un errore di configurazione (codice 2). Il messaggio indica file, chiave e valore, ad esempio `log-tracer.toml: high_latency.warn_ms must be a positive number, got -5`. Per una chiave sconosciuta viene suggerita quella più simile, se esiste. Le regole sono queste:
+  - i conteggi sono interi positivi;
+  - le soglie in millisecondi sono numeri positivi e finiti;
+  - i booleani non valgono come numeri;
+  - `critical_ms` deve essere maggiore di `warn_ms`, anche per ogni servizio dopo aver ereditato i valori globali;
+  - `recurring_error.high_count` deve essere maggiore o uguale a `min_occurrences`.
+
+  Sono accettate solo le sezioni delle regole già implementate: le chiavi di `warning_before_error` ed `error_spike` diventano valide insieme alle rispettive regole.
+- **CFG-3** La precedenza è: valori di default, poi file di configurazione, poi opzioni della CLI che corrispondono a una chiave (oggi solo `top-errors --limit`, che prevale su `report.top_errors`). Le soglie di un servizio ereditano da `high_latency` quelle che non specificano. I filtri CLI non sono configurazione e sono registrati a parte nel report.
+- **CFG-4** Un file mancante o illeggibile, non UTF-8 o con sintassi TOML non valida (il messaggio riporta riga e colonna) è un errore di configurazione (codice 2). La configurazione viene controllata prima di leggere i log, così un errore non fa sprecare un'analisi lunga.
 
 | Chiave | Default |
 |---|---|
@@ -399,12 +407,16 @@ I filtri `--service`, `--since` e `--until` definiscono il **perimetro dell'anal
 | `error_spike.min_errors` | 5 |
 
 ```toml
+# examples/log-tracer.toml
 [high_latency]
-warn_ms = 800
+warn_ms = 1000
+critical_ms = 5000
 
-[high_latency.services.payments]
-warn_ms = 2000
-critical_ms = 8000
+[high_latency.services.payments]   # critical_ms ereditato: 5000
+warn_ms = 3000
+
+[high_latency.services.api-gateway] # warn_ms ereditato: 1000
+critical_ms = 2700
 ```
 
 ---

@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
+from log_tracer.config import AnalysisConfig, HighLatencyConfig, LatencyThresholds
 from log_tracer.models import (
     CorrelationGroup,
     DataWarning,
@@ -50,7 +51,30 @@ def test_metadata_and_configuration() -> None:
     assert data["config"] == {
         "report": {"max_examples": 10, "top_errors": 10},
         "recurring_error": {"min_occurrences": 3, "high_count": 20},
+        "high_latency": {"warn_ms": 1000, "critical_ms": 5000, "services": {}},
     }
+
+
+def test_service_thresholds_are_encoded_in_name_order() -> None:
+    services = {
+        "payments": LatencyThresholds(warn_ms=3000, critical_ms=5000),
+        "api-gateway": LatencyThresholds(warn_ms=1000, critical_ms=2700.5),
+    }
+    config = AnalysisConfig(high_latency=HighLatencyConfig(services=services))
+    encoded = report_to_dict(make_report(config=config))["config"]
+    assert isinstance(encoded, dict)
+    assert encoded["high_latency"] == {
+        "warn_ms": 1000,
+        "critical_ms": 5000,
+        "services": {
+            "api-gateway": {"warn_ms": 1000, "critical_ms": 2700.5},
+            "payments": {"warn_ms": 3000, "critical_ms": 5000},
+        },
+    }
+    latency = encoded["high_latency"]
+    assert isinstance(latency, dict)
+    assert isinstance(latency["services"], dict)
+    assert list(latency["services"]) == ["api-gateway", "payments"]
 
 
 def test_inputs_identify_each_analyzed_file() -> None:

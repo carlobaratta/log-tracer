@@ -21,8 +21,14 @@ from rich.console import Console
 from rich.text import Text
 
 from log_tracer import __version__
-from log_tracer.config import AnalysisConfig
-from log_tracer.errors import InputError, LogTracerError, NotFoundError, OutputError
+from log_tracer.config import AnalysisConfig, load_config
+from log_tracer.errors import (
+    ConfigError,
+    InputError,
+    LogTracerError,
+    NotFoundError,
+    OutputError,
+)
 from log_tracer.ingestion.fields import normalize_identifier
 from log_tracer.models import DataWarning, InputFormat, Report, Severity, WarningCode
 from log_tracer.pipeline import run_analysis, run_inspect
@@ -75,6 +81,14 @@ Paths = Annotated[
 FormatOption = Annotated[
     OutputFormat,
     typer.Option("--format", help="'text' for a terminal summary, 'json' for the full report."),
+]
+ConfigOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--config",
+        help="TOML file with analysis thresholds; it is checked before the logs are read.",
+        readable=False,
+    ),
 ]
 InputFormatOption = Annotated[
     InputFormatChoice,
@@ -129,9 +143,10 @@ def analyze(
             "--fail-on", help="Exit with code 1 if a finding has this severity or higher."
         ),
     ] = None,
+    config_path: ConfigOption = None,
 ) -> None:
     """Analyze log files and print a summary (or the JSON report)."""
-    report = _run(paths, AnalysisConfig(), input_format)
+    report = _run(paths, _load_config(config_path), input_format)
     report_json = json_report.dumps(report)
     if output is not None:
         # Written before stdout: if this fails, nothing partial is printed.
@@ -149,16 +164,25 @@ def analyze(
 def top_errors(
     paths: Paths,
     limit: Annotated[
-        int, typer.Option("--limit", min=1, help="Number of error groups to show.")
-    ] = 10,
+        int | None,
+        typer.Option(
+            "--limit",
+            min=1,
+            help="Number of error groups to show [default: report.top_errors, 10].",
+            show_default=False,
+        ),
+    ] = None,
     output_format: FormatOption = OutputFormat.TEXT,
     input_format: InputFormatOption = InputFormatChoice.AUTO,
+    config_path: ConfigOption = None,
 ) -> None:
     """Show the most frequent error groups (ERROR and CRITICAL events)."""
-    defaults = AnalysisConfig()
-    config = dataclasses.replace(
-        defaults, report=dataclasses.replace(defaults.report, top_errors=limit)
-    )
+    config = _load_config(config_path)
+    if limit is not None:
+        # Precedence: command-line flag, then configuration file, then default.
+        config = dataclasses.replace(
+            config, report=dataclasses.replace(config.report, top_errors=limit)
+        )
     report = _run(paths, config, input_format)
     if output_format is OutputFormat.JSON:
         typer.echo(json_report.dumps_top_errors(report), nl=False)
@@ -212,6 +236,11 @@ def inspect_command(
 # --- Helpers ---------------------------------------------------------------------------
 
 
+def _load_config(path: Path | None) -> AnalysisConfig:
+    with _exit_on_error():
+        return AnalysisConfig() if path is None else load_config(path)
+
+
 def _run(paths: list[Path], config: AnalysisConfig, input_format: InputFormatChoice) -> Report:
     with _exit_on_error():
         report = run_analysis(
@@ -254,6 +283,9 @@ def _exit_on_error() -> Iterator[None]:
         yield
     except typer.Exit:
         raise
+    except ConfigError as error:
+        _print_error(error)
+        raise typer.Exit(ExitCode.USAGE) from error
     except (InputError, OutputError) as error:
         _print_error(error)
         raise typer.Exit(ExitCode.INPUT) from error
