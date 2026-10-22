@@ -33,6 +33,7 @@ class Level(enum.IntEnum):
 
 class InputFormat(enum.StrEnum):
     TEXT = "text"
+    JSONL = "jsonl"
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -65,9 +66,16 @@ class Event:
 class IssueCode(enum.StrEnum):
     """A field problem: the event is kept, but a value was missing or assumed."""
 
+    TIMESTAMP_MISSING = "timestamp.missing"
+    TIMESTAMP_INVALID = "timestamp.invalid"
     TIMESTAMP_ASSUMED_UTC = "timestamp.assumed_utc"
+    LEVEL_MISSING = "level.missing"
     LEVEL_UNKNOWN = "level.unknown"
     MESSAGE_MISSING = "message.missing"
+    MESSAGE_INVALID = "message.invalid"
+    SERVICE_INVALID = "service.invalid"
+    REQUEST_ID_INVALID = "request_id.invalid"
+    TRACE_ID_INVALID = "trace_id.invalid"
     DURATION_INVALID = "duration_ms.invalid"
     ENCODING_INVALID = "encoding.invalid"
 
@@ -77,6 +85,9 @@ class UnparsedReason(enum.StrEnum):
 
     NO_MATCH = "no_match"
     INVALID_TIMESTAMP = "invalid_timestamp"
+    INVALID_JSON = "invalid_json"
+    NOT_AN_OBJECT = "not_an_object"
+    NO_KNOWN_FIELDS = "no_known_fields"
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,12 +122,43 @@ class SourceSummary:
     """Set when the file could not be read; the counters are then zero (ING-7)."""
 
 
+class SkipReason(enum.StrEnum):
+    """Why a file found while walking a directory was not analyzed (ING-1)."""
+
+    UNSUPPORTED_EXTENSION = "unsupported_extension"
+    NOT_A_REGULAR_FILE = "not_a_regular_file"
+    SYMLINKED_DIRECTORY = "symlinked_directory"
+    UNREADABLE_DIRECTORY = "unreadable_directory"
+
+
+@dataclass(frozen=True, slots=True)
+class SkippedFile:
+    path: str
+    reason: SkipReason
+
+
+class WarningCode(enum.StrEnum):
+    UNREADABLE_FILE = "unreadable_file"
+    MOSTLY_UNPARSED = "mostly_unparsed"
+
+
+@dataclass(frozen=True, slots=True)
+class IngestionWarning:
+    """A problem worth telling the user about on stderr (ING-7, ING-9)."""
+
+    code: WarningCode
+    path: str
+    message: str
+
+
 @dataclass(frozen=True, slots=True)
 class IngestionSummary:
     sources: tuple[SourceSummary, ...]
+    skipped: tuple[SkippedFile, ...]
     unparsed_counts: Mapping[UnparsedReason, int]
     unparsed_samples: tuple[UnparsedLine, ...]
     issue_counts: Mapping[IssueCode, int]
+    warnings: tuple[IngestionWarning, ...]
 
 
 @dataclass(frozen=True, slots=True)

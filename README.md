@@ -2,7 +2,7 @@
 
 Log Tracer is a local, offline command-line tool for analyzing log files. It reads them, normalizes every line into a common event model, and reports recurring problems with deterministic, documented rules. The same input and configuration always produce the same report. It needs no network access, credentials, or external services.
 
-> **Status: early development (increment 1 of 10).** Today Log Tracer reads the text format and reports recurring errors as JSON. JSON Lines input, terminal tables, request timelines (`inspect`) and the remaining rules come in later increments. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
+> **Status: early development (increment 2 of 10).** Today Log Tracer reads text and JSON Lines logs, from single files or whole directories, and reports recurring errors as JSON. Terminal tables, request timelines (`inspect`) and the remaining rules come in later increments. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
 
 ## Requirements
 
@@ -27,10 +27,12 @@ uv run log-tracer --version
 ## Usage
 
 ```bash
-log-tracer analyze examples/sample.log --format json
+log-tracer analyze examples/logs/                         # a directory, walked recursively
+log-tracer analyze app.log worker.jsonl                   # explicit files
+log-tracer analyze service.log --input-format jsonl       # JSON Lines in a .log file
 ```
 
-The command writes a single JSON report to stdout, so you can pipe it to other programs. Errors and hints go to stderr. On the bundled example, the report contains:
+The command writes a single JSON report to stdout, so you can pipe it to other programs. Errors, warnings and hints go to stderr. For example, Log Tracer warns when at least half of a file's lines cannot be parsed, because this usually means the file uses another format. On the bundled example, the report contains:
 
 - the identity of each input (path, size, SHA-256);
 - line counts: events, blank lines, and unparsed lines with the reason for each;
@@ -46,10 +48,21 @@ Unparsable lines are counted and reported, never silently dropped.
 |---|---|
 | 0 | Analysis completed, even if there are findings or unparsable lines |
 | 2 | Invalid command-line usage |
-| 3 | Input error: missing path, unsupported file type, no readable file |
+| 3 | Input error: missing path, unsupported file type, directory without supported files, no readable file |
 | 70 | Internal error, which is a bug. A traceback is printed on stderr |
 
-### Input format
+### Input formats
+
+The format of each file is chosen by its extension:
+
+| Extension | Format |
+|---|---|
+| `.log`, `.txt` | text (see below) |
+| `.jsonl`, `.ndjson` | JSON Lines: one JSON object per line |
+
+`--input-format text|jsonl` sets the parser for every file instead. Inside directories, files are still selected by extension, so `--input-format` never makes Log Tracer read a `README.md` as a log. Files in a directory that are not analyzed are listed in the report's `skipped_files`, with the reason. Hidden files are ignored.
+
+#### Text
 
 Text logs follow one documented line format (see [SPEC.md §2.2](SPEC.md#22-formato-testuale-v1-text)):
 
@@ -63,7 +76,10 @@ Text logs follow one documented line format (see [SPEC.md §2.2](SPEC.md#22-form
 
 - **Timestamp:** ISO 8601. A timestamp without an offset is assumed to be UTC, and the report records this assumption.
 - **Trailing fields:** `request_id`, `trace_id` and `duration_ms` are mapped to the event model. Other `key=value` fields are kept as attributes.
-- **Accepted files:** `.log` and `.txt`.
+
+#### JSON Lines
+
+Common field names are recognized: for example `timestamp`, `ts` or `@timestamp` for the time, and `message` or `msg` for the message. The full list of aliases and type rules is in [SPEC.md §2.3](SPEC.md#23-formato-json-lines-jsonl). Other fields are kept as attributes. A line that is not valid JSON, or is not an object, is counted as unparsed. An object without a timestamp is still analyzed as an event without a time.
 
 ## Development
 

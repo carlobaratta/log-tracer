@@ -63,12 +63,20 @@ Log Tracer è uno strumento a riga di comando, locale e offline, che:
 
 ### 2.1 Requisiti generali
 
-- **ING-1** L'input è costituito da uno o più percorsi, file o directory. Le directory sono visitate ricorsivamente. File e directory nascosti (con nome che inizia per `.`) sono ignorati. I link simbolici a directory non sono seguiti.
+- **ING-1** L'input è costituito da uno o più percorsi, file o directory. Le directory sono visitate ricorsivamente. File e directory nascosti (con nome che inizia per `.`) sono ignorati senza segnalazione. Ogni altro file trovato e non analizzato è elencato in `skipped_files`, con uno di questi motivi:
+  - `unsupported_extension`: estensione non riconosciuta;
+  - `not_a_regular_file`: link rotto, FIFO o dispositivo, che non vengono mai letti perché potrebbero bloccare la lettura;
+  - `symlinked_directory`: link simbolico a una directory, non seguito perché potrebbe uscire dall'albero o formare un ciclo;
+  - `unreadable_directory`: directory di cui non si può leggere il contenuto.
+
+  Un percorso esplicito che non è un file regolare produce un errore di input.
 - **ING-2** Il formato si deduce dall'estensione:
   - `.log` e `.txt` corrispondono al formato `text`;
   - `.jsonl` e `.ndjson` corrispondono al formato `jsonl`.
 
-  L'opzione `--input-format text|jsonl` forza il formato per tutti gli input. Il valore di default `auto` usa l'estensione. Dentro una directory, i file con altre estensioni sono saltati ed elencati nel report (`skipped_files`). Un file indicato esplicitamente con un'estensione non riconosciuta, senza `--input-format`, produce un errore di input.
+  L'opzione `--input-format text|jsonl` sceglie il parser al posto dell'estensione. Il valore di default `auto` usa l'estensione. L'opzione cambia **come** si leggono i file, non **quali** file si leggono:
+  - dentro una directory i file sono sempre selezionati per estensione, e quelli con altre estensioni sono saltati (`skipped_files`), così un `README.md` non viene mai letto come log;
+  - un file indicato esplicitamente con un'estensione non riconosciuta è accettato solo con `--input-format`; senza, produce un errore di input.
 - **ING-3** Se lo stesso file è raggiunto più volte, dopo la risoluzione del percorso, viene analizzato una sola volta. Le sorgenti sono elaborate in ordine lessicografico di percorso, indipendentemente dall'ordine degli argomenti.
 - **ING-4** I file sono letti come UTF-8 e un eventuale BOM iniziale è ignorato. I byte non validi sono sostituiti con U+FFFD e l'evento riceve il problema `encoding.invalid`. Sono supportati i terminatori di riga LF e CRLF.
 - **ING-5** Le righe vuote o composte solo da spazi non sono né eventi né righe non interpretabili. Sono conteggiate come `blank_lines`.
@@ -78,7 +86,7 @@ Log Tracer è uno strumento a riga di comando, locale e offline, che:
   - i primi N esempi (percorso, riga, motivo ed estratto troncato a 200 caratteri), con N = `report.max_examples` (default 10).
 - **ING-7** Un file illeggibile (permessi, rimozione durante l'esecuzione, errore di I/O) è registrato nel report con il relativo errore e l'analisi prosegue sugli altri file. Se nessuna sorgente è leggibile, si verifica un errore di input.
 - **ING-8** Ogni evento conserva il percorso della sorgente e il numero di riga, che parte da 1.
-- **ING-9** Se in un file almeno il 50% delle righe non vuote è non interpretabile, il programma stampa su stderr un avviso che suggerisce di verificare il formato.
+- **ING-9** Se in un file almeno il 50% delle righe non vuote è non interpretabile, viene prodotto un avviso `mostly_unparsed`, che indica la percentuale (arrotondata per difetto) e il formato usato. Un file illeggibile (ING-7) produce un avviso `unreadable_file`. Gli avvisi finiscono in `data_quality.warnings` e la CLI li stampa su stderr; per `mostly_unparsed` aggiunge il suggerimento di usare `--input-format`.
 
 ### 2.2 Formato testuale v1 (`text`)
 
@@ -121,7 +129,7 @@ Esempi:
   - `invalid_json`: la sintassi non è valida, inclusa una nidificazione eccessiva;
   - `not_an_object`: il JSON è valido ma non è un oggetto;
   - `no_known_fields`: l'oggetto non contiene nessuno tra timestamp, livello e messaggio.
-- **JL-2** I campi si riconoscono tramite alias. Se ne sono presenti più di uno, vale il primo nell'ordine della tabella e gli altri restano negli attributi.
+- **JL-2** I campi si riconoscono tramite alias. Se ne sono presenti più di uno, vale il primo nell'ordine della tabella e gli altri restano negli attributi. Un valore `null` equivale a un campo assente: si passa all'alias successivo, e un alias `null` non viene conservato negli attributi. Se una chiave è duplicata, vale l'ultima occorrenza.
 
   | Campo | Alias, in ordine di priorità |
   |---|---|
@@ -138,13 +146,14 @@ Esempi:
   | Campo | Valori accettati |
   |---|---|
   | timestamp | Stringa ISO 8601 con la stessa forma di §2.2. La parte oraria è obbligatoria: `2026-10-16` da solo non è valido. |
-  | livello | Stringa, senza distinzione tra maiuscole e minuscole. I livelli numerici, ad esempio `30`, diventano `UNKNOWN`. |
+  | livello | Stringa, senza distinzione tra maiuscole e minuscole. Qualunque altro valore (ad esempio il numero `30`) diventa `UNKNOWN`, conserva il valore originale in JSON compatto e registra `level.unknown`. Un livello assente registra `level.missing`. |
   | messaggio | Stringa. Un valore non stringa è convertito in JSON compatto e registra `message.invalid`. |
   | servizio | Stringa non vuota. |
   | request_id, trace_id | Stringa, oppure intero convertito in stringa decimale. I booleani non sono accettati. |
   | duration_ms | Numero o stringa numerica, finito e ≥ 0. I booleani, `NaN` e `Infinity` non sono accettati. |
 
 - **JL-4** I campi non riconosciuti finiscono negli attributi. I valori che non sono stringhe sono serializzati in JSON compatto con chiavi ordinate.
+- **JL-6** Le sequenze di escape JSON come `"\ud800"` producono surrogati isolati, che non sono caratteri Unicode validi e impedirebbero di scrivere il report in UTF-8. Vengono sostituiti con U+FFFD e l'evento registra `encoding.invalid`, una sola volta anche se il problema compare in più campi.
 - **JL-5** Se un timestamp manca o non è valido, l'evento viene comunque creato senza timestamp e con il problema `timestamp.missing` o `timestamp.invalid`.
 
 ### 2.4 Normalizzazione dei campi
@@ -341,9 +350,9 @@ I filtri `--service`, `--since` e `--until` definiscono il **perimetro dell'anal
 | `config` | La configurazione effettiva usata (§7). |
 | `filters` | `services`, `since` e `until` attivi. |
 | `inputs` | Per ogni sorgente: `path`, `format`, `size_bytes`, `sha256`, `lines`, `blank_lines`, `events`, `unparsed`, `error`. |
-| `skipped_files` | Per ogni file saltato: `path` e `reason`. |
+| `skipped_files` | Per ogni file saltato: `path` e `reason` (ING-1), in ordine di percorso. |
 | `summary` | `events`, `unparsed_lines`, `time_range` (`start` e `end`), `levels` (conteggio per ogni livello, inclusi quelli a zero), `correlation_groups`, `uncorrelated_events`, `findings_by_severity` |
-| `data_quality` | `unparsed_by_reason`, `unparsed_samples`, `field_issues` (conteggio per problema, ad esempio `timestamp.assumed_utc`), `warnings` |
+| `data_quality` | `unparsed_by_reason`, `unparsed_samples`, `field_issues` (conteggio per problema, ad esempio `timestamp.assumed_utc`), `warnings` (per ogni avviso: `code`, `path`, `message`; ING-9) |
 | `rules` | Per ogni regola: `rule`, `status` e `reason`. |
 | `top_errors` | Per ogni gruppo: `service`, `fingerprint`, `count`, `first_seen`, `last_seen`, `events`. |
 | `findings` | Elenco dei finding (§4). |

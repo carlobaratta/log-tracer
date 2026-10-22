@@ -12,16 +12,23 @@ from log_tracer import __version__
 from log_tracer.analysis import analyze
 from log_tracer.config import AnalysisConfig
 from log_tracer.ingestion import ingest
-from log_tracer.models import Report
+from log_tracer.models import InputFormat, Report
 
 
-def run_analysis(paths: Sequence[Path], *, config: AnalysisConfig, now: datetime) -> Report:
+def run_analysis(
+    paths: Sequence[Path],
+    *,
+    config: AnalysisConfig,
+    now: datetime,
+    input_format: InputFormat | None = None,
+) -> Report:
     """Analyze ``paths`` and assemble the report.
 
     ``now`` becomes ``generated_at``. It is a parameter rather than a call to
     the clock, so that the result depends on the inputs alone (NFR-2).
+    ``input_format`` forces the parser for every file (ING-2).
     """
-    ingestion = ingest(paths, max_samples=config.report.max_examples)
+    ingestion = ingest(paths, input_format=input_format, max_samples=config.report.max_examples)
     analysis = analyze(ingestion.events, config)
     return Report(
         tool_version=__version__,

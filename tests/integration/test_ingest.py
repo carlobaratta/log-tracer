@@ -9,7 +9,17 @@ import pytest
 
 from log_tracer.errors import InputError
 from log_tracer.ingestion import ingest
-from log_tracer.models import IssueCode, Level, SourceRef, UnparsedReason
+from log_tracer.models import (
+    IngestionWarning,
+    InputFormat,
+    IssueCode,
+    Level,
+    SkippedFile,
+    SkipReason,
+    SourceRef,
+    UnparsedReason,
+    WarningCode,
+)
 
 MIXED_LOG = (
     "2026-10-16T14:00:00Z INFO [api] started\n"
@@ -139,6 +149,13 @@ def test_unreadable_file_is_recorded_and_others_are_analyzed(workdir: Path) -> N
     assert by_path["locked.log"].events == 0
     assert by_path["ok.log"].error is None
     assert [e.message for e in result.events] == ["fine"]
+    assert result.summary.warnings == (
+        IngestionWarning(
+            WarningCode.UNREADABLE_FILE,
+            "locked.log",
+            "locked.log could not be read (Permission denied) and was skipped",
+        ),
+    )
 
 
 @needs_permissions
@@ -150,3 +167,92 @@ def test_no_readable_source_is_an_input_error(workdir: Path) -> None:
             ingest([Path("locked.log")], max_samples=10)
     finally:
         locked.chmod(0o644)
+
+
+# --- Formats and directories (ING-1, ING-2, JL-1) -------------------------------------
+
+TEXT_LINES = "2026-10-16T14:00:00Z INFO [api] text event\n"
+JSON_LINES = (
+    '{"timestamp": "2026-10-16T14:00:01Z", "level": "error", "message": "json event"}\n'
+    "{broken json\n"
+    '["not", "an", "object"]\n'
+)
+
+
+def test_directory_with_mixed_formats(workdir: Path) -> None:
+    (workdir / "logs").mkdir()
+    write(workdir / "logs" / "app.log", TEXT_LINES)
+    write(workdir / "logs" / "svc.jsonl", JSON_LINES)
+    write(workdir / "logs" / "notes.md", "# not a log\n")
+
+    result = ingest([Path("logs")], max_samples=10)
+
+    assert [(s.path, s.format, s.events, s.unparsed) for s in result.summary.sources] == [
+        ("logs/app.log", InputFormat.TEXT, 1, 0),
+        ("logs/svc.jsonl", InputFormat.JSONL, 1, 2),
+    ]
+    assert [e.message for e in result.events] == ["text event", "json event"]
+    assert result.summary.unparsed_counts == {
+        UnparsedReason.INVALID_JSON: 1,
+        UnparsedReason.NOT_AN_OBJECT: 1,
+    }
+    assert result.summary.skipped == (
+        SkippedFile("logs/notes.md", SkipReason.UNSUPPORTED_EXTENSION),
+    )
+
+
+def test_input_format_forces_the_parser(workdir: Path) -> None:
+    write(workdir / "app.log", JSON_LINES)
+    result = ingest([Path("app.log")], input_format=InputFormat.JSONL, max_samples=10)
+    (source,) = result.summary.sources
+    assert source.format is InputFormat.JSONL
+    assert [e.message for e in result.events] == ["json event"]
+
+
+def test_an_encoding_issue_is_counted_once_per_event(workdir: Path) -> None:
+    # Invalid UTF-8 bytes (reader) and a lone surrogate escape (JSON parser)
+    # on the same line are one problem for one event.
+    line = b'{"level": "info", "message": "caf\xe9 \\ud800"}\n'
+    write(workdir / "app.jsonl", line)
+    summary = ingest([Path("app.jsonl")], max_samples=10).summary
+    assert summary.issue_counts[IssueCode.ENCODING_INVALID] == 1
+
+
+# --- Mostly unparsed files (ING-9) ---------------------------------------------------------
+
+
+def text_file(events: int, unparsed: int, blank: int = 0) -> str:
+    good = "2026-10-16T14:00:00Z INFO [api] ok\n"
+    return good * events + "garbage\n" * unparsed + "\n" * blank
+
+
+@pytest.mark.parametrize(
+    ("events", "unparsed", "warned"),
+    [(1, 1, True), (2, 2, True), (0, 3, True), (51, 49, False), (3, 0, False), (0, 0, False)],
+)
+def test_warning_when_at_least_half_of_the_lines_are_unparsed(
+    workdir: Path, events: int, unparsed: int, warned: bool
+) -> None:
+    write(workdir / "app.log", text_file(events, unparsed, blank=5))  # blanks never count
+    warnings = ingest([Path("app.log")], max_samples=10).summary.warnings
+    assert [w.code for w in warnings] == ([WarningCode.MOSTLY_UNPARSED] if warned else [])
+
+
+def test_mostly_unparsed_warning_names_the_file_share_and_format(workdir: Path) -> None:
+    write(workdir / "app.log", text_file(events=1, unparsed=2))
+    (warning,) = ingest([Path("app.log")], max_samples=10).summary.warnings
+    assert warning == IngestionWarning(
+        WarningCode.MOSTLY_UNPARSED,
+        "app.log",
+        "66% of the non-blank lines in app.log could not be parsed as text",
+    )
+
+
+def test_warnings_follow_the_source_order(workdir: Path) -> None:
+    write(workdir / "b.log", text_file(events=0, unparsed=1))
+    write(workdir / "a.log", text_file(events=0, unparsed=1))
+    write(workdir / "c.log", text_file(events=1, unparsed=0))
+    warnings = ingest(
+        [Path("b.log"), Path("c.log"), Path("a.log")], max_samples=10
+    ).summary.warnings
+    assert [w.path for w in warnings] == ["a.log", "b.log"]

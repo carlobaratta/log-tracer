@@ -8,7 +8,7 @@ translated into exit codes (SPEC §5.4).
 import enum
 import sys
 import traceback
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +19,7 @@ import typer
 from log_tracer import __version__
 from log_tracer.config import AnalysisConfig
 from log_tracer.errors import InputError, LogTracerError
+from log_tracer.models import IngestionWarning, InputFormat, WarningCode
 from log_tracer.pipeline import run_analysis
 from log_tracer.reporting import json_report
 
@@ -32,6 +33,12 @@ class ExitCode(enum.IntEnum):
 
 class OutputFormat(enum.StrEnum):
     JSON = "json"
+
+
+class InputFormatChoice(enum.StrEnum):
+    AUTO = "auto"
+    TEXT = "text"
+    JSONL = "jsonl"
 
 
 app = typer.Typer(
@@ -65,16 +72,38 @@ def _root(
 def analyze(
     paths: Annotated[
         list[Path],
-        typer.Argument(help="Log files to analyze (.log, .txt).", show_default=False),
+        typer.Argument(
+            help="Log files or directories (.log, .txt, .jsonl, .ndjson).",
+            show_default=False,
+            # Click would reject an unreadable file as a usage error (exit 2).
+            # Ingestion handles it as SPEC §9 requires: a warning when other
+            # files remain, an input error (exit 3) when none can be read.
+            readable=False,
+        ),
     ],
     output_format: Annotated[
         OutputFormat, typer.Option("--format", help="Output format.")
     ] = OutputFormat.JSON,
+    input_format: Annotated[
+        InputFormatChoice,
+        typer.Option(
+            "--input-format",
+            help="Parser to use for every file; 'auto' chooses it by file extension.",
+        ),
+    ] = InputFormatChoice.AUTO,
 ) -> None:
     """Analyze log files and print the report."""
     with _exit_on_error():
-        report = run_analysis(paths, config=AnalysisConfig(), now=datetime.now(UTC))
+        report = run_analysis(
+            paths,
+            config=AnalysisConfig(),
+            now=datetime.now(UTC),
+            input_format=None
+            if input_format is InputFormatChoice.AUTO
+            else InputFormat(input_format),
+        )
         output = json_report.dumps(report)
+    _print_warnings(report.ingestion.warnings)
     typer.echo(output, nl=False)
 
 
@@ -92,6 +121,16 @@ def _exit_on_error() -> Iterator[None]:
         typer.echo("Internal error: this is a bug in log-tracer. Details follow.", err=True)
         traceback.print_exception(error, file=sys.stderr)
         raise typer.Exit(ExitCode.INTERNAL) from error
+
+
+def _print_warnings(warnings: Iterable[IngestionWarning]) -> None:
+    """Warnings go to stderr, so that stdout stays a single JSON document (CLI-1, CLI-2)."""
+    for warning in warnings:
+        typer.echo(f"Warning: {warning.message}", err=True)
+        if warning.code is WarningCode.MOSTLY_UNPARSED:
+            typer.echo(
+                "Hint: if the file uses another format, choose it with --input-format", err=True
+            )
 
 
 def _print_error(error: LogTracerError) -> None:

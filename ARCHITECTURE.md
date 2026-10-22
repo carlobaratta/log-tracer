@@ -81,9 +81,10 @@ log-tracer/
 │       └── terminal.py         # rendering Rich, con escape del contenuto dei log
 ├── tests/                      # vedi §8
 ├── examples/
-│   ├── sample.log
-│   ├── sample.jsonl
-│   └── expected_report.json
+│   ├── logs/                   # input della demo: analyze examples/logs/
+│   │   ├── sample.log
+│   │   └── sample.jsonl
+│   └── expected_report.json    # fuori da logs/, così non finisce tra i file saltati
 └── docs/demo.md
 ```
 
@@ -210,16 +211,23 @@ class IssueCode(StrEnum):  # problemi di campo: l'evento resta valido
     TIMESTAMP_MISSING = "timestamp.missing"
     TIMESTAMP_INVALID = "timestamp.invalid"
     TIMESTAMP_ASSUMED_UTC = "timestamp.assumed_utc"
+    LEVEL_MISSING = "level.missing"
     LEVEL_UNKNOWN = "level.unknown"
     MESSAGE_MISSING = "message.missing"
+    MESSAGE_INVALID = "message.invalid"
+    SERVICE_INVALID = "service.invalid"
+    REQUEST_ID_INVALID = "request_id.invalid"
+    TRACE_ID_INVALID = "trace_id.invalid"
     DURATION_INVALID = "duration_ms.invalid"
     ENCODING_INVALID = "encoding.invalid"
-    # ... uno per ogni campo con conversione (SPEC JL-3)
 
 
 class UnparsedReason(StrEnum):
     NO_MATCH = "no_match"
     INVALID_TIMESTAMP = "invalid_timestamp"
+    INVALID_JSON = "invalid_json"
+    NOT_AN_OBJECT = "not_an_object"
+    NO_KNOWN_FIELDS = "no_known_fields"
     INVALID_JSON = "invalid_json"
     NOT_AN_OBJECT = "not_an_object"
     NO_KNOWN_FIELDS = "no_known_fields"
@@ -255,13 +263,32 @@ class SourceSummary:
 
 
 @dataclass(frozen=True, slots=True)
-class IngestionResult:
+class SkippedFile:  # file trovato in una directory e non analizzato (ING-1)
+    path: str
+    reason: SkipReason  # unsupported_extension, not_a_regular_file, ...
+
+
+@dataclass(frozen=True, slots=True)
+class IngestionWarning:  # stampato su stderr dalla CLI (ING-7, ING-9)
+    code: WarningCode  # unreadable_file, mostly_unparsed
+    path: str
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class IngestionSummary:
     sources: tuple[SourceSummary, ...]
     skipped: tuple[SkippedFile, ...]
-    events: tuple[Event, ...]
     unparsed_counts: Mapping[UnparsedReason, int]
     unparsed_samples: tuple[UnparsedLine, ...]  # solo i primi N
     issue_counts: Mapping[IssueCode, int]
+    warnings: tuple[IngestionWarning, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class IngestionResult:
+    events: tuple[Event, ...]
+    summary: IngestionSummary
 ```
 
 `IngestionResult` conserva i **conteggi** e solo un **campione** delle righe non interpretabili. In questo modo un file con un milione di righe malformate non occupa memoria proporzionale.
@@ -394,7 +421,7 @@ Due casi limite della libreria standard sono stati verificati su Python 3.12 e 3
 | Livello | Cosa verifica | Strumenti | Velocità |
 |---|---|---|---|
 | Unitari | Parser, normalizzazione, impronta, correlazione, singole regole, configurazione, codec JSON, escape del terminale | pytest con parametrize; factory `make_event()` | ms |
-| Basati su proprietà | I parser non sollevano mai eccezioni (NFR-7); l'impronta è idempotente; la timeline è invariante alle permutazioni dell'input; il codec JSON fa un round-trip senza perdite | Hypothesis | < 5 s |
+| Basati su proprietà | I parser non sollevano mai eccezioni e producono solo testo UTF-8 valido (NFR-7); l'impronta è idempotente; un evento valido scritto in formato testo o JSONL e riletto dà gli stessi campi; la discovery non dipende dall'ordine degli argomenti | Hypothesis | < 5 s |
 | Architettura | Le regole di §4 sugli import | `ast` | ms |
 | Integrazione | `pipeline.run_analysis` su file reali in `tmp_path`: più file, directory, deduplica, file vuoto, file illeggibile, determinismo | pytest | < 1 s ciascuno |
 | End-to-end | Comandi CLI: codici di uscita (SPEC §9), JSON valido su stdout, messaggi su stderr, stato in `tmp_path`, test golden su `examples/` | `typer.testing.CliRunner` | < 1 s ciascuno |
@@ -413,7 +440,8 @@ tests/
 
 - **Tracciabilità.** Ogni test cita il requisito che verifica, ad esempio `test_text_line_with_invalid_date_is_unparsed  # ING-6, §2.2`. Un requisito senza test è un requisito non verificato.
 - **Rete.** Una fixture `autouse` sostituisce `socket.socket.connect` con una funzione che fallisce, così l'offline (NFR-1) è verificato a ogni esecuzione.
-- **Test golden.** `examples/expected_report.json` viene confrontato con l'output di `analyze examples/ --format json` dopo aver normalizzato `generated_at`. Rigenerarlo è un'azione esplicita documentata in `docs/demo.md`, mai automatica.
+- **Test golden.** `examples/expected_report.json` viene confrontato con l'output di `analyze examples/logs/ --format json` dopo aver normalizzato `generated_at`. Rigenerarlo è un'azione esplicita documentata in `docs/demo.md`, mai automatica.
+- **Hypothesis.** In locale il profilo `dev` genera esempi casuali, così ogni esecuzione può trovare casi nuovi. In CI il profilo `ci` (`HYPOTHESIS_PROFILE=ci`) usa `derandomize=True`: gli esempi dipendono solo dal test, e un fallimento si riproduce rieseguendo lo stesso commit. In entrambi `deadline=None` evita fallimenti dovuti alla lentezza dei runner.
 - **Grandi input.** Un test marcato `@pytest.mark.slow` genera 100 000 righe e verifica conteggi e risultati, **non i tempi**: le soglie di tempo in CI producono test instabili. I tempi si misurano a mano (NFR-3).
 
 ### 8.3 Casi limite richiesti dalla specifica iniziale
@@ -461,7 +489,7 @@ Dipendenze:
 |---|---|---|
 | `quality` | ubuntu, Python 3.12 | `uv sync --locked` → `ruff check` → `ruff format --check` → `mypy` |
 | `test` | ubuntu × {3.12, 3.13, 3.14}, più windows e macos con 3.14 | `uv run pytest --cov` (inclusi i test `slow`); report di copertura come artefatto |
-| `package` | ubuntu, dopo `test` | `uv build` → installazione della wheel in un venv pulito → `log-tracer --version` → `log-tracer analyze examples/ --format json --no-save` validato con `python -m json.tool` |
+| `package` | ubuntu, dopo `test` | `uv build` → installazione della wheel in un venv pulito → `log-tracer --version` → `log-tracer analyze examples/logs/ --format json` validato con `python -m json.tool` |
 
 Il workflow si avvia su `push` verso `main` e su `pull_request`, con `permissions: contents: read`, `concurrency` per annullare le esecuzioni superate e un `timeout-minutes` su ogni job. Le action sono fissate alla versione maggiore.
 

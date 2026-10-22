@@ -16,11 +16,13 @@ from log_tracer.models import (
     EvidenceValue,
     Finding,
     IngestionSummary,
+    IngestionWarning,
     IssueCode,
     Level,
     Report,
     RuleOutcome,
     Severity,
+    SkippedFile,
     SourceRef,
     SourceSummary,
     UnparsedLine,
@@ -63,6 +65,7 @@ def report_to_dict(report: Report) -> JsonObject:
         "generated_at": format_timestamp(report.generated_at),
         "config": dataclasses.asdict(report.config),
         "inputs": [_source(source) for source in ingestion.sources],
+        "skipped_files": [_skipped(skipped) for skipped in ingestion.skipped],
         "summary": _summary(report),
         "data_quality": _data_quality(ingestion),
         "rules": [_rule(outcome) for outcome in analysis.rules],
@@ -108,7 +111,16 @@ def _data_quality(ingestion: IngestionSummary) -> JsonObject:
         },
         "unparsed_samples": [_unparsed(sample) for sample in ingestion.unparsed_samples],
         "field_issues": {code.value: ingestion.issue_counts.get(code, 0) for code in IssueCode},
+        "warnings": [_warning(warning) for warning in ingestion.warnings],
     }
+
+
+def _skipped(skipped: SkippedFile) -> JsonObject:
+    return {"path": skipped.path, "reason": skipped.reason.value}
+
+
+def _warning(warning: IngestionWarning) -> JsonObject:
+    return {"code": warning.code.value, "path": warning.path, "message": warning.message}
 
 
 def _source(source: SourceSummary) -> JsonObject:

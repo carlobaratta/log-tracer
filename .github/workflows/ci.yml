@@ -50,6 +50,8 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: uv run pytest --cov --cov-report=term-missing --cov-report=xml
+        env:
+          HYPOTHESIS_PROFILE: ci
       - if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
         uses: actions/upload-artifact@v7
         with:
@@ -74,5 +76,5 @@ jobs:
       - name: Run the installed command
         run: |
           /tmp/smoke/bin/log-tracer --version
-          /tmp/smoke/bin/log-tracer analyze examples/sample.log --format json > report.json
+          /tmp/smoke/bin/log-tracer analyze examples/logs/ --format json > report.json
           /tmp/smoke/bin/python -m json.tool report.json > /dev/null

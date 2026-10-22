@@ -14,6 +14,7 @@ from log_tracer.models import (
     EvidenceValue,
     Finding,
     IngestionSummary,
+    IngestionWarning,
     InputFormat,
     IssueCode,
     Level,
@@ -21,11 +22,14 @@ from log_tracer.models import (
     RuleName,
     RuleOutcome,
     Severity,
+    SkippedFile,
+    SkipReason,
     SourceRef,
     SourceSummary,
     TimeRange,
     UnparsedLine,
     UnparsedReason,
+    WarningCode,
 )
 from log_tracer.reporting.json_report import dumps, format_timestamp, report_to_dict
 from tests.factories import T0, at
@@ -70,11 +74,19 @@ def make_report(
         config=AnalysisConfig(),
         ingestion=IngestionSummary(
             sources=sources,
+            skipped=(SkippedFile("logs/notes.md", SkipReason.UNSUPPORTED_EXTENSION),),
             unparsed_counts=MappingProxyType({UnparsedReason.NO_MATCH: 2}),
             unparsed_samples=(
                 UnparsedLine(SourceRef("logs/app.log", 5), UnparsedReason.NO_MATCH, "garbage"),
             ),
             issue_counts=MappingProxyType({IssueCode.LEVEL_UNKNOWN: 1}),
+            warnings=(
+                IngestionWarning(
+                    WarningCode.MOSTLY_UNPARSED,
+                    "logs/app.log",
+                    "66% of the non-blank lines in logs/app.log could not be parsed as text",
+                ),
+            ),
         ),
         analysis=AnalysisResult(
             level_counts=MappingProxyType({Level.INFO: 4, Level.ERROR: 3}),
@@ -103,6 +115,7 @@ def test_top_level_keys_are_present_in_a_fixed_order() -> None:  # REP-1
         "generated_at",
         "config",
         "inputs",
+        "skipped_files",
         "summary",
         "data_quality",
         "rules",
@@ -169,18 +182,44 @@ def test_summary_time_range_is_encoded_in_utc() -> None:
 def test_data_quality_lists_every_reason_and_issue_including_zeros() -> None:
     data_quality = report_to_dict(make_report())["data_quality"]
     assert data_quality == {
-        "unparsed_by_reason": {"no_match": 2, "invalid_timestamp": 0},
+        "unparsed_by_reason": {
+            "no_match": 2,
+            "invalid_timestamp": 0,
+            "invalid_json": 0,
+            "not_an_object": 0,
+            "no_known_fields": 0,
+        },
         "unparsed_samples": [
             {"path": "logs/app.log", "line": 5, "reason": "no_match", "excerpt": "garbage"}
         ],
         "field_issues": {
+            "timestamp.missing": 0,
+            "timestamp.invalid": 0,
             "timestamp.assumed_utc": 0,
+            "level.missing": 0,
             "level.unknown": 1,
             "message.missing": 0,
+            "message.invalid": 0,
+            "service.invalid": 0,
+            "request_id.invalid": 0,
+            "trace_id.invalid": 0,
             "duration_ms.invalid": 0,
             "encoding.invalid": 0,
         },
+        "warnings": [
+            {
+                "code": "mostly_unparsed",
+                "path": "logs/app.log",
+                "message": "66% of the non-blank lines in logs/app.log could not be parsed as text",
+            }
+        ],
     }
+
+
+def test_skipped_files_are_listed_with_their_reason() -> None:
+    assert report_to_dict(make_report())["skipped_files"] == [
+        {"path": "logs/notes.md", "reason": "unsupported_extension"}
+    ]
 
 
 def test_rules_top_errors_and_findings() -> None:

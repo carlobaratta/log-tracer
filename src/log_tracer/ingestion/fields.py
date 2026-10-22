@@ -5,6 +5,7 @@ the raw value is absent or invalid, and never raises. Deciding which problem
 code to record is left to the caller, which knows the context.
 """
 
+import math
 import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -104,3 +105,14 @@ def parse_duration_ms(raw: str) -> float | None:
     if _DURATION_RE.fullmatch(raw) is None:
         return None
     return float(raw)
+
+
+def normalize_duration_number(value: int | float) -> float | None:
+    """Accept a JSON number of milliseconds if it is finite and non-negative."""
+    try:
+        duration = float(value)
+    except OverflowError:  # an integer too large to be represented as a float
+        return None
+    if not math.isfinite(duration) or duration < 0:
+        return None
+    return duration + 0.0  # turns -0.0 into 0.0

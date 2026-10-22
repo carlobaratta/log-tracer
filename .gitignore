@@ -22,3 +22,6 @@ htmlcov/
 
 # OS
 .DS_Store
+
+# Hypothesis example database
+.hypothesis/
