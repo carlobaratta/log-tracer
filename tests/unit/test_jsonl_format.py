@@ -138,8 +138,10 @@ def test_duplicate_keys_keep_the_last_value() -> None:
         '{"message": "truncated"',
         "not json at all",
         "{'single': 'quotes'}",
-        "[" * 100_000,  # deep nesting raises RecursionError, not ValueError
-        "1" * 5_000,  # beyond Python's int conversion limit: ValueError
+        # Long values get short ids: pytest puts the test id in the environment
+        # variable PYTEST_CURRENT_TEST, which Windows limits to 32767 characters.
+        pytest.param("[" * 100_000, id="deep-nesting"),  # RecursionError, not ValueError
+        pytest.param("1" * 5_000, id="huge-integer"),  # beyond the int conversion limit
     ],
 )
 def test_invalid_json(line: str) -> None:
@@ -305,7 +307,10 @@ def test_invalid_durations(value: object) -> None:
     assert (event.duration_ms, issues) == (None, (IssueCode.DURATION_INVALID,))
 
 
-@pytest.mark.parametrize("literal", ["NaN", "Infinity", "-Infinity", "1e400", "1" * 400])
+@pytest.mark.parametrize(
+    "literal",
+    ["NaN", "Infinity", "-Infinity", "1e400", pytest.param("1" * 400, id="400-digit-integer")],
+)
 def test_non_finite_or_huge_durations_are_invalid(literal: str) -> None:
     # json.loads accepts NaN and Infinity; 1e400 overflows to inf; a 400-digit
     # integer cannot be converted to a float at all.
