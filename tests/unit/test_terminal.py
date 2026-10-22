@@ -19,6 +19,8 @@ from rich.console import Console, RenderableType
 from log_tracer.models import (
     CorrelationGroup,
     Event,
+    Filters,
+    FilterSummary,
     IssueCode,
     Level,
     RuleName,
@@ -234,6 +236,41 @@ def test_log_content_is_escaped_everywhere() -> None:  # CLI-4
     assert "\x1b" not in output
 
 
+def test_filters_are_shown_only_when_active() -> None:  # D-9
+    assert not any(line.startswith("Filters:") for line in lines(render_report(make_report())))
+
+
+ACTIVE_FILTERS = FilterSummary(
+    Filters(services=("api", "pay[red]"), since=at(0), until=at(60)),
+    excluded_events=3,
+    excluded_without_timestamp=1,
+    warnings=(),
+)
+
+
+def test_active_filters_and_events_in_scope() -> None:  # D-19
+    shown = lines(render_report(make_report(filters=ACTIVE_FILTERS)))
+    assert shown[0] == "Log Tracer 0.1.0 · 1 file · 4 events · 2 unparsed lines"
+    assert shown[2] == (
+        "Filters: service api, pay[red] · since 2026-10-16T14:00:00.000Z · "
+        "until 2026-10-16T14:01:00.000Z · 3 events excluded (1 without a timestamp)"
+    )
+
+
+@pytest.mark.parametrize(
+    ("filters", "expected"),
+    [
+        (Filters(services=("api",)), "Filters: service api · 1 event excluded"),
+        (Filters(since=at(0)), "Filters: since 2026-10-16T14:00:00.000Z · 1 event excluded"),
+        (Filters(until=at(0)), "Filters: until 2026-10-16T14:00:00.000Z · 1 event excluded"),
+    ],
+    ids=["service", "since", "until"],
+)
+def test_each_filter_alone(filters: Filters, expected: str) -> None:
+    report = make_report(filters=FilterSummary(filters, 1, 0, ()))
+    assert expected in lines(render_report(report))
+
+
 # --- Top errors command -----------------------------------------------------------------------
 
 
@@ -251,6 +288,19 @@ def test_top_errors_ranks_are_aligned() -> None:
     output = plain(render_top_errors(make_report(top_errors=groups)))
     assert " 1. 3x payments: error 0" in output
     assert "10. 3x payments: error 9" in output
+
+
+def test_top_errors_view_with_filters() -> None:
+    shown = lines(render_top_errors(make_report(filters=ACTIVE_FILTERS)))
+    assert shown[0] == "Top errors in 1 file (4 events)"
+    assert shown[1].startswith("Filters: service api, pay[red] · since ")
+
+
+def test_top_errors_view_without_errors_states_the_filters() -> None:
+    report = make_report(top_errors=(), filters=ACTIVE_FILTERS)
+    shown = lines(render_top_errors(report))
+    assert shown[0] == "No ERROR or CRITICAL events found in 1 file (4 events)."
+    assert shown[1].startswith("Filters: service api, pay[red] · since ")
 
 
 def test_top_errors_view_without_errors() -> None:

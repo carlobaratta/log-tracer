@@ -19,6 +19,8 @@ from log_tracer.config import AnalysisConfig, ErrorSpikeConfig, HighLatencyConfi
 from log_tracer.models import (
     DataWarning,
     ErrorGroup,
+    Filters,
+    FilterSummary,
     Finding,
     Level,
     RuleName,
@@ -52,6 +54,13 @@ LATENCY_FINDING = Finding(
     correlation_ids=("t-1", "t-2"),
 )
 COR6 = DataWarning(WarningCode.LARGE_CORRELATION_GROUP, None, "sequence r1 has 12000 events")
+UNMATCHED = DataWarning(WarningCode.UNMATCHED_SERVICE_FILTER, None, "no event has service 'x'")
+FILTERS = FilterSummary(
+    Filters(services=("payments", "x"), since=at(0), until=at(90)),
+    excluded_events=2,
+    excluded_without_timestamp=1,
+    warnings=(UNMATCHED,),
+)
 
 
 def round_trip(report_json: str) -> str:
@@ -90,6 +99,7 @@ def test_rich_report_round_trips() -> None:  # STA-2
         analysis_warnings=(COR6,),
         top_errors=(TOP_ERROR, dataclasses.replace(TOP_ERROR, service=None, fingerprint="x")),
         sources=(SOURCE, dataclasses.replace(SOURCE, path="b.log", sha256=None, error="denied")),
+        filters=FILTERS,
     )
     original = dumps(report)
     assert round_trip(original) == original
@@ -118,13 +128,23 @@ log_lines = st.lists(
 )
 
 
-@given(log_lines)
-def test_any_analysis_round_trips(lines: list[str]) -> None:  # STA-2, NFR-2
+filters = st.builds(
+    Filters,
+    services=st.lists(st.sampled_from(["api", "payments", "db", "nope"]), unique=True).map(
+        lambda names: tuple(sorted(names))
+    ),
+    since=st.none() | st.just(at(1)),
+    until=st.none() | st.just(at(3)),
+)
+
+
+@given(log_lines, filters)
+def test_any_analysis_round_trips(lines: list[str], scope: Filters) -> None:  # STA-2, NFR-2
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "app.log"
         path.write_text("\n".join(lines), encoding="utf-8")
         config = AnalysisConfig(error_spike=ErrorSpikeConfig(min_errors=1))
-        original = dumps(run_analysis([path], config=config, now=T0))
+        original = dumps(run_analysis([path], config=config, now=T0, filters=scope))
     assert round_trip(original) == original
 
 
@@ -141,7 +161,8 @@ def test_decoded_model_values() -> None:
             RuleOutcome(RuleName.HIGH_LATENCY, "ok", None, (LATENCY_FINDING,)),
         ),
     )
-    decoded = loads(dumps(report))
+    decoded = loads(dumps(dataclasses.replace(report, filters=FILTERS)))
+    assert decoded.filters == FILTERS
     assert decoded.generated_at == T0
     assert decoded.config == report.config
     assert decoded.ingestion.sources == report.ingestion.sources

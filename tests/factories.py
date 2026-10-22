@@ -13,6 +13,8 @@ from log_tracer.models import (
     ErrorGroup,
     Event,
     EvidenceValue,
+    Filters,
+    FilterSummary,
     Finding,
     IngestionSummary,
     InputFormat,
@@ -116,8 +118,12 @@ TOP_ERROR = ErrorGroup(
 )
 
 
+NO_FILTERS = FilterSummary(Filters(), excluded_events=0, excluded_without_timestamp=0, warnings=())
+
+
 def make_report(
     *,
+    filters: FilterSummary = NO_FILTERS,
     sources: tuple[SourceSummary, ...] = (SOURCE,),
     skipped: tuple[SkippedFile, ...] = (SKIPPED,),
     unparsed_counts: Mapping[UnparsedReason, int] | None = None,
@@ -143,6 +149,7 @@ def make_report(
         tool_version="0.1.0",
         generated_at=T0,
         config=AnalysisConfig() if config is None else config,
+        filters=filters,
         ingestion=IngestionSummary(
             sources=sources,
             skipped=skipped,

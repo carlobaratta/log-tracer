@@ -62,12 +62,13 @@ def test_limit_reduces_the_list() -> None:
 
 
 @pytest.mark.usefixtures("in_repo")
-def test_json_document() -> None:
+def test_json_document() -> None:  # REP-5, D-21
     data = as_json(invoke("examples/logs", "--format", "json"))
     assert list(data) == [
         "schema_version",
         "tool",
         "generated_at",
+        "filters",
         "inputs",
         "skipped_files",
         "top_errors",

@@ -7,6 +7,7 @@ run the whole analysis without going through command-line parsing.
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
+from typing import Final
 
 from log_tracer import __version__
 from log_tracer.analysis import analyze
@@ -14,7 +15,20 @@ from log_tracer.analysis.correlation import correlate, find_groups
 from log_tracer.config import AnalysisConfig
 from log_tracer.errors import StateError
 from log_tracer.ingestion import ingest, ingest_files
-from log_tracer.models import IngestionResult, IngestionSummary, InputFormat, Inspection, Report
+from log_tracer.models import (
+    DataWarning,
+    Event,
+    Filters,
+    FilterSummary,
+    IngestionResult,
+    IngestionSummary,
+    InputFormat,
+    Inspection,
+    Report,
+    WarningCode,
+)
+
+NO_FILTERS: Final = Filters()
 
 
 def run_analysis(
@@ -23,22 +37,69 @@ def run_analysis(
     config: AnalysisConfig,
     now: datetime,
     input_format: InputFormat | None = None,
+    filters: Filters = NO_FILTERS,
 ) -> Report:
     """Analyze ``paths`` and assemble the report.
 
     ``now`` becomes ``generated_at``. It is a parameter rather than a call to
     the clock, so that the result depends on the inputs alone (NFR-2).
-    ``input_format`` forces the parser for every file (ING-2).
+    ``input_format`` forces the parser for every file (ING-2). ``filters``
+    restrict the events the rules see (D-9).
     """
     ingestion = ingest(paths, input_format=input_format, max_samples=config.report.max_examples)
-    analysis = analyze(ingestion.events, config)
+    events, filter_summary = filter_events(ingestion.events, filters)
     return Report(
         tool_version=__version__,
         generated_at=now,
         config=config,
+        filters=filter_summary,
         ingestion=ingestion.summary,
-        analysis=analysis,
+        analysis=analyze(events, config),
     )
+
+
+def filter_events(
+    events: Sequence[Event], filters: Filters
+) -> tuple[tuple[Event, ...], FilterSummary]:
+    """Keep the events inside the scope of the analysis (D-9, D-18, D-19).
+
+    Services are matched exactly, and an event without a service never
+    matches a service filter. With a time bound, an event without a
+    timestamp is excluded and counted apart, since its time is unknown.
+    """
+    services = tuple(sorted(set(filters.services)))
+    bounded = filters.since is not None or filters.until is not None
+    kept: list[Event] = []
+    without_timestamp = 0
+    for event in events:
+        if services and event.service not in services:
+            continue
+        if bounded:
+            if event.timestamp is None:
+                without_timestamp += 1
+                continue
+            if filters.since is not None and event.timestamp < filters.since:
+                continue
+            if filters.until is not None and event.timestamp >= filters.until:
+                continue
+        kept.append(event)
+    present = {event.service for event in events}
+    warnings = tuple(
+        DataWarning(
+            WarningCode.UNMATCHED_SERVICE_FILTER,
+            None,
+            f"no event has service '{name}' (service names are matched exactly)",
+        )
+        for name in services
+        if name not in present
+    )
+    summary = FilterSummary(
+        filters=Filters(services, filters.since, filters.until),
+        excluded_events=len(events) - len(kept),
+        excluded_without_timestamp=without_timestamp,
+        warnings=warnings,
+    )
+    return tuple(kept), summary
 
 
 def run_inspect(

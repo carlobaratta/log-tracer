@@ -7,7 +7,7 @@ import pytest
 from log_tracer import __version__
 from log_tracer.config import AnalysisConfig, RecurringErrorConfig
 from log_tracer.errors import StateError
-from log_tracer.models import InputFormat, RuleName, Severity
+from log_tracer.models import Filters, InputFormat, RuleName, Severity
 from log_tracer.pipeline import changed_sources, run_analysis, run_inspect_saved
 from log_tracer.reporting.json_report import dumps
 from tests.factories import T0
@@ -67,6 +67,16 @@ def test_report_is_identical_across_runs_and_argument_orders(logs: list[Path]) -
     again = dumps(run_analysis(logs, config=AnalysisConfig(), now=T0))
     reversed_order = dumps(run_analysis(logs[::-1], config=AnalysisConfig(), now=T0))
     assert first == again == reversed_order
+
+
+def test_filters_restrict_what_the_rules_see(logs: list[Path]) -> None:  # D-9
+    everything = run_analysis(logs, config=AnalysisConfig(), now=T0)
+    only_db = run_analysis(logs, config=AnalysisConfig(), now=T0, filters=Filters(services=("db",)))
+    assert [f.rule for f in everything.analysis.findings] == [RuleName.RECURRING_ERROR]
+    assert only_db.analysis.findings == ()
+    assert [g.service for g in only_db.analysis.top_errors] == ["db"]
+    assert only_db.filters.excluded_events == 4  # 5 events, 1 from db
+    assert only_db.ingestion == everything.ingestion  # the inputs are the same
 
 
 # --- inspect without paths (STA-3) ------------------------------------------------------

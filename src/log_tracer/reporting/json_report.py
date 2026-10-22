@@ -25,6 +25,8 @@ from log_tracer.models import (
     ErrorGroup,
     Event,
     EvidenceValue,
+    Filters,
+    FilterSummary,
     Finding,
     IngestionSummary,
     InputFormat,
@@ -103,13 +105,21 @@ def inspection_to_dict(inspection: Inspection) -> JsonObject:
 
 
 def top_errors_to_dict(report: Report) -> JsonObject:
-    """The ``top-errors`` output: report metadata, inputs and error groups only.
+    """The ``top-errors`` output: report metadata, filters, inputs and error groups only.
 
     Every part has the same shape as in the full report, so a consumer can
-    parse both with the same code.
+    parse both with the same code (REP-5, D-21).
     """
     full = report_to_dict(report)
-    keys = ("schema_version", "tool", "generated_at", "inputs", "skipped_files", "top_errors")
+    keys = (
+        "schema_version",
+        "tool",
+        "generated_at",
+        "filters",
+        "inputs",
+        "skipped_files",
+        "top_errors",
+    )
     return {key: full[key] for key in keys}
 
 
@@ -120,6 +130,7 @@ def report_to_dict(report: Report) -> JsonObject:
         "tool": {"name": TOOL_NAME, "version": report.tool_version},
         "generated_at": format_timestamp(report.generated_at),
         "config": _config(report.config),
+        "filters": _filters(report.filters),
         "inputs": [_source(source) for source in ingestion.sources],
         "skipped_files": [_skipped(skipped) for skipped in ingestion.skipped],
         "summary": _summary(report),
@@ -147,7 +158,9 @@ def _summary(report: Report) -> JsonObject:
     time_range = analysis.time_range
     severities = Counter(finding.severity for finding in analysis.findings)
     return {
-        "events": sum(source.events for source in ingestion.sources),
+        # The events the rules saw; inputs[].events count every event read (D-19).
+        "events": sum(source.events for source in ingestion.sources)
+        - report.filters.excluded_events,
         "unparsed_lines": sum(ingestion.unparsed_counts.values()),
         "time_range": {
             "start": _optional_timestamp(time_range.start if time_range else None),
@@ -164,7 +177,8 @@ def _summary(report: Report) -> JsonObject:
 
 def _data_quality(report: Report) -> JsonObject:
     ingestion = report.ingestion
-    warnings = (*ingestion.warnings, *report.analysis.warnings)
+    # In the order of the stages that found them.
+    warnings = (*ingestion.warnings, *report.filters.warnings, *report.analysis.warnings)
     return {
         "unparsed_by_reason": {
             reason.value: ingestion.unparsed_counts.get(reason, 0) for reason in UnparsedReason
@@ -172,6 +186,18 @@ def _data_quality(report: Report) -> JsonObject:
         "unparsed_samples": [_unparsed(sample) for sample in ingestion.unparsed_samples],
         "field_issues": {code.value: ingestion.issue_counts.get(code, 0) for code in IssueCode},
         "warnings": [_warning(warning) for warning in warnings],
+    }
+
+
+def _filters(summary: FilterSummary) -> JsonObject:
+    filters = summary.filters
+    services: list[JsonValue] = list(filters.services)  # annotated: list is invariant
+    return {
+        "services": services,
+        "since": _optional_timestamp(filters.since),
+        "until": _optional_timestamp(filters.until),
+        "excluded_events": summary.excluded_events,
+        "excluded_without_timestamp": summary.excluded_without_timestamp,
     }
 
 
@@ -324,6 +350,8 @@ _SEVERITIES: Final = {severity.name.lower(): severity for severity in Severity}
 _LEVELS: Final = {level.name: level for level in Level}
 _STATUSES: Final[Mapping[str, Literal["ok", "skipped"]]] = {"ok": "ok", "skipped": "skipped"}
 _ANALYSIS_WARNINGS: Final = frozenset({WarningCode.LARGE_CORRELATION_GROUP})
+_FILTER_WARNINGS: Final = frozenset({WarningCode.UNMATCHED_SERVICE_FILTER})
+_INGESTION_WARNINGS: Final = frozenset(WarningCode) - _ANALYSIS_WARNINGS - _FILTER_WARNINGS
 
 
 def loads(text: str) -> Report:
@@ -379,6 +407,7 @@ def report_from_dict(data: Mapping[str, object]) -> Report:
         tool_version=root.obj("tool").text("version"),
         generated_at=root.timestamp("generated_at"),
         config=config,
+        filters=_decode_filters(root.obj("filters"), warnings),
         ingestion=IngestionSummary(
             sources=tuple(_decode_source(node) for node in root.objects("inputs")),
             skipped=tuple(
@@ -395,8 +424,8 @@ def report_from_dict(data: Mapping[str, object]) -> Report:
                 for node in quality.objects("unparsed_samples")
             ),
             issue_counts=quality.counts("field_issues", _values(IssueCode)),
-            # The report lists both kinds of warnings together, ingestion first.
-            warnings=tuple(w for w in warnings if w.code not in _ANALYSIS_WARNINGS),
+            # The report lists the warnings of every stage together: split them by code.
+            warnings=tuple(w for w in warnings if w.code in _INGESTION_WARNINGS),
         ),
         analysis=AnalysisResult(
             level_counts=summary.counts("levels", _LEVELS),
@@ -418,6 +447,19 @@ def report_from_dict(data: Mapping[str, object]) -> Report:
             uncorrelated_events=summary.integer("uncorrelated_events"),
             warnings=tuple(w for w in warnings if w.code in _ANALYSIS_WARNINGS),
         ),
+    )
+
+
+def _decode_filters(node: "_Node", warnings: tuple[DataWarning, ...]) -> FilterSummary:
+    return FilterSummary(
+        filters=Filters(
+            services=node.strs("services"),
+            since=node.optional_timestamp("since"),
+            until=node.optional_timestamp("until"),
+        ),
+        excluded_events=node.integer("excluded_events"),
+        excluded_without_timestamp=node.integer("excluded_without_timestamp"),
+        warnings=tuple(w for w in warnings if w.code in _FILTER_WARNINGS),
     )
 
 

@@ -2,7 +2,7 @@
 
 Log Tracer is a local, offline command-line tool for analyzing log files. It reads them, normalizes every line into a common event model, and reports recurring problems with deterministic, documented rules. The same input and configuration always produce the same report. It needs no network access, credentials, or external services.
 
-> **Status: early development (increment 7 of 10, in progress).** Log Tracer reads text and JSON Lines logs, from single files or whole directories, correlates events by `request_id` and `trace_id`, shows the timeline of a request, and applies four diagnostic rules, in the terminal or as JSON, with thresholds you can configure. The last analysis is saved, so it can be shown again with `report`. Filters by service and time come next. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
+> **Status: early development (increment 7 of 10).** Log Tracer reads text and JSON Lines logs, from single files or whole directories, correlates events by `request_id` and `trace_id`, shows the timeline of a request, and applies four diagnostic rules, in the terminal or as JSON, with thresholds you can configure. The analysis can be limited to some services or to a time interval, and the last one is saved, so it can be shown again with `report`. Examples, golden tests and a demo come next. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
 
 ## Requirements
 
@@ -34,6 +34,8 @@ log-tracer analyze app.log worker.jsonl                   # explicit files
 log-tracer analyze service.log --input-format jsonl       # JSON Lines in a .log file
 log-tracer analyze logs/ --fail-on high                   # exit code 1 if a finding is high
 log-tracer analyze logs/ --config log-tracer.toml         # custom thresholds
+log-tracer analyze logs/ --service payments --service api # only these services
+log-tracer analyze logs/ --since 2026-10-16T14:00:00Z --until 2026-10-16T15:00:00Z
 log-tracer top-errors examples/logs/ --limit 5            # the most frequent errors only
 log-tracer inspect req-184 examples/logs/                 # timeline of one request or trace
 log-tracer report                                         # the last analysis again, without the logs
@@ -99,6 +101,15 @@ Sequence 4bf92f3577b34da6 · 6 events · 4 services · 2.790 s
 ```
 
 Identifiers are matched exactly, including upper and lower case. Events are only ever linked through identifiers, never because they are close in time. The order across services follows the timestamps each service wrote, so it is a diagnostic hint, not proof of causality.
+
+### Filters
+
+`--service`, `--since` and `--until` (on `analyze` and `top-errors`) limit the analysis: the rules only see the events that match, and the report records the filters in its `filters` section, with the number of events left out.
+
+- `--service NAME` keeps the events of that service. It can be repeated, and names are matched exactly, including upper and lower case. A name that no event has produces a warning, since it is probably a typo.
+- `--since TS` keeps events at or after TS, and `--until TS` events strictly before it. TS is an ISO 8601 timestamp (UTC when it has no offset) or a date alone, such as `2026-10-16`, meaning midnight UTC. With either bound, events without a timestamp are left out and counted apart.
+
+In the report, `summary.events` counts the events in scope, while `inputs[].events` still counts every event read from each file.
 
 ### Saved analysis
 

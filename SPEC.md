@@ -318,14 +318,14 @@ Gli stessi gruppi alimentano anche la sezione `top_errors` del report (i primi `
 | `--output FILE` | `analyze`, `report` | Scrive **anche** il report JSON su FILE, qualunque sia il valore di `--format`. |
 | `--input-format auto\|text\|jsonl` | `analyze`, `top-errors`, `inspect` | Forza il formato di input. Il default è `auto`, cioè per estensione. |
 | `--config FILE` | `analyze`, `top-errors` | File di configurazione TOML (§7). |
-| `--service NAME` | `analyze`, `top-errors` | Limita l'analisi a uno o più servizi. È ripetibile. |
-| `--since TS`, `--until TS` | `analyze`, `top-errors` | Limita l'analisi a un intervallo temporale (ISO 8601). Quando sono attivi, gli eventi senza timestamp sono esclusi e conteggiati. |
+| `--service NAME` | `analyze`, `top-errors` | Limita l'analisi a uno o più servizi. È ripetibile. Il nome è confrontato in modo esatto, maiuscole e minuscole comprese; un evento senza servizio è escluso. |
+| `--since TS`, `--until TS` | `analyze`, `top-errors` | Limita l'analisi a un intervallo temporale: `--since` incluso, `--until` escluso (D-18). TS è un timestamp ISO 8601 (senza fuso è UTC) oppure una data sola, intesa come mezzanotte UTC (D-20). Quando sono attivi, gli eventi senza timestamp sono esclusi e conteggiati. |
 | `--limit N` | `top-errors` | Numero di gruppi da mostrare, almeno 1. Il default è 10. Può superare `report.top_errors`. |
 | `--fail-on low\|medium\|high` | `analyze` | Esce con codice 1 se esiste un finding di severità pari o superiore. L'output viene comunque stampato per intero e su stderr compare il motivo, ad esempio `Found 3 findings with severity medium or higher (--fail-on medium)`. |
 | `--no-save` | `analyze` | Non salva lo stato. |
 | `--state-dir DIR` | `analyze`, `inspect`, `report` | Directory dello stato. Il default è `.log-tracer`; si può impostare anche con la variabile `LOG_TRACER_STATE_DIR`. |
 
-I filtri `--service`, `--since` e `--until` definiscono il **perimetro dell'analisi**: le regole vedono solo gli eventi filtrati. Il report registra i filtri attivi.
+I filtri `--service`, `--since` e `--until` definiscono il **perimetro dell'analisi**: le regole vedono solo gli eventi filtrati. Il report registra i filtri attivi. I filtri sono controllati prima di leggere i log: un TS non valido, `--since` non precedente a `--until` o un nome di servizio vuoto terminano con codice 2. Un `--service` che non corrisponde a nessun evento letto produce l'avviso `unmatched_service_filter` (D-19).
 
 ### 5.3 Contratto di output
 
@@ -363,10 +363,10 @@ I filtri `--service`, `--since` e `--until` definiscono il **perimetro dell'anal
 | `tool` | `{ "name": "log-tracer", "version": "0.1.0" }` |
 | `generated_at` | Istante di generazione (RFC 3339, UTC). |
 | `config` | La configurazione effettiva usata (§7), dopo l'unione di default e file; le soglie per servizio sono già unite a quelle globali ed elencate in ordine alfabetico. |
-| `filters` | `services`, `since` e `until` attivi. |
+| `filters` | `services` (in ordine alfabetico, senza duplicati), `since` e `until` attivi, oppure `[]` e `null`; `excluded_events` (eventi letti ma esclusi dai filtri) ed `excluded_without_timestamp` (quelli esclusi perché senza timestamp mentre un limite temporale è attivo). |
 | `inputs` | Per ogni sorgente: `path`, `format`, `size_bytes`, `sha256`, `lines`, `blank_lines`, `events`, `unparsed`, `error`. |
 | `skipped_files` | Per ogni file saltato: `path` e `reason` (ING-1), in ordine di percorso. |
-| `summary` | `events`, `unparsed_lines`, `time_range` (`start` e `end`), `levels` (conteggio per ogni livello, inclusi quelli a zero), `correlation_groups`, `uncorrelated_events`, `findings_by_severity` |
+| `summary` | `events` (gli eventi nel perimetro, dopo i filtri; `inputs[].events` conta invece tutti gli eventi letti), `unparsed_lines`, `time_range` (`start` e `end`), `levels` (conteggio per ogni livello, inclusi quelli a zero), `correlation_groups`, `uncorrelated_events`, `findings_by_severity` |
 | `data_quality` | `unparsed_by_reason`, `unparsed_samples`, `field_issues` (conteggio per problema, ad esempio `timestamp.assumed_utc`), `warnings` (per ogni avviso: `code`, `path`, `message`; ING-9) |
 | `rules` | Per ogni regola: `rule`, `status` e `reason`. |
 | `top_errors` | Per ogni gruppo: `service`, `fingerprint`, `count`, `first_seen`, `last_seen`, `events`, `correlation_groups` (numero di sequenze che contengono almeno un suo evento), `correlation_ids` (le loro etichette, in ordine di prima occorrenza, al massimo `max_examples`). |
@@ -375,7 +375,7 @@ I filtri `--service`, `--since` e `--until` definiscono il **perimetro dell'anal
 - **REP-2** Gli eventi sono riferiti come `{"path": …, "line": …}`. Il report non contiene il contenuto integrale dei log, fatta eccezione per gli estratti delle righe non interpretabili.
 - **REP-3** I percorsi sono riportati come forniti dall'utente, in notazione POSIX. Il report non aggiunge percorsi assoluti che potrebbero esporre informazioni locali.
 - **REP-4** Per lo stesso input e la stessa configurazione, due report differiscono solo in `generated_at`.
-- **REP-5** `top-errors --format json` produce un documento con le sole chiavi `schema_version`, `tool`, `generated_at`, `inputs`, `skipped_files` e `top_errors`. Ognuna ha la stessa forma che ha nel report completo, così lo stesso codice può leggere entrambi i documenti.
+- **REP-5** `top-errors --format json` produce un documento con le sole chiavi `schema_version`, `tool`, `generated_at`, `filters`, `inputs`, `skipped_files` e `top_errors` (D-21). Ognuna ha la stessa forma che ha nel report completo, così lo stesso codice può leggere entrambi i documenti.
 - **REP-6** `inspect --format json` produce un documento con le chiavi `schema_version`, `tool`, `generated_at`, `query`, `inputs`, `skipped_files` e `sequences`. Ogni sequenza contiene `label`, `request_ids`, `trace_ids`, `services`, `event_count`, `time_range` ed `events`. A differenza del report, che cita gli eventi solo come riferimenti (REP-2), qui gli eventi sono completi, perché mostrarne il contenuto è lo scopo di `inspect`. Ogni evento contiene `path`, `line`, `timestamp`, `level`, `raw_level`, `service`, `message`, `request_id`, `trace_id`, `duration_ms` e `attributes`.
 
 ---
@@ -515,6 +515,11 @@ Gli errori di contenuto (righe e campi) non interrompono mai l'analisi. Gli erro
 | D-15 | `has_critical` di un gruppo di errori, assente dal report, si ricostruisce dal finding `recurring_error` dello stesso gruppo; senza finding vale falso | Serve solo a calcolare la severità di RUL-1, che è già nel finding; lo schema resta invariato. | Aggiungere `has_critical` a `top_errors`, cambiando lo schema. |
 | D-16 | `inspect` senza PATH rilegge ogni sorgente con il formato salvato in `inputs[].format`; un `--input-format` esplicito lo sostituisce | Un'analisi fatta con `--input-format jsonl` su file `.log` resta coerente quando la si ispeziona. | Scegliere di nuovo il formato per estensione. |
 | D-17 | `analyze` salva lo stato dopo `--output` e prima di stampare su stdout, anche quando poi scatta `--fail-on`; se il salvataggio fallisce esce con codice 3 senza stampare | Come per `--output`, nessun output parziale; `--fail-on` riguarda l'esito, non il salvataggio. | Salvare dopo la stampa: stdout completo ma codice 3, ambiguo per uno script. |
+| D-18 | `--since` è incluso e `--until` è escluso | Intervalli semiaperti consecutivi (`--until X`, poi `--since X`) non si sovrappongono e non lasciano buchi. | Entrambi inclusi: un evento sul confine finirebbe in due analisi. |
+| D-19 | `summary.events` conta gli eventi nel perimetro, `inputs[].events` quelli letti; un servizio di `--service` assente da tutti gli eventi letti produce un avviso | Il riepilogo descrive ciò che le regole hanno visto, gli input descrivono i file; un nome sbagliato non deve dare in silenzio un'analisi vuota. Un servizio presente ma fuori dall'intervallo temporale non è un errore e non genera avvisi. | Nessun avviso: un errore di battitura sembrerebbe un sistema senza problemi. |
+| D-20 | `--since` e `--until` accettano i timestamp dei log e anche una data sola (mezzanotte UTC) | Lo stesso formato dei log evita sorprese; la data sola è il caso d'uso più comune. | Accettare espressioni relative (`1h`, `yesterday`): dipendono dall'orologio e rendono il report non riproducibile. |
+| D-21 | Anche il documento di `top-errors` include `filters` | Senza, un elenco di errori filtrato sembrerebbe quello completo. | Lasciare REP-5 invariato. |
+| D-22 | Lo schema resta `1.0` anche con la chiave `filters` | La v0.1.0 non è ancora stata rilasciata, quindi non esistono consumatori da proteggere; un report salvato prima dell'aggiunta viene rifiutato (`missing key 'filters'`) con il suggerimento di rieseguire `analyze`. | Passare a `1.1` e trattare `filters` come facoltativo. |
 
 ## 13. Questioni aperte
 

@@ -141,6 +141,7 @@ class WarningCode(enum.StrEnum):
     UNREADABLE_FILE = "unreadable_file"
     MOSTLY_UNPARSED = "mostly_unparsed"
     LARGE_CORRELATION_GROUP = "large_correlation_group"
+    UNMATCHED_SERVICE_FILTER = "unmatched_service_filter"
 
 
 @dataclass(frozen=True, slots=True)
@@ -262,6 +263,32 @@ class AnalysisResult:
     """Problems found by the analysis itself, such as COR-6."""
 
 
+# --- Filters ---------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class Filters:
+    """The scope of an analysis: only matching events reach the rules (D-9)."""
+
+    services: tuple[str, ...] = ()
+    """Service names, matched exactly; empty means every service."""
+    since: datetime | None = None
+    """Inclusive lower bound (D-18)."""
+    until: datetime | None = None
+    """Exclusive upper bound (D-18)."""
+
+
+@dataclass(frozen=True, slots=True)
+class FilterSummary:
+    filters: Filters
+    """The criteria, with services deduplicated and sorted."""
+    excluded_events: int
+    excluded_without_timestamp: int
+    """Excluded events with no timestamp, counted only when a time bound is active."""
+    warnings: tuple[DataWarning, ...]
+    """One warning for each service that no event has."""
+
+
 # --- Report ----------------------------------------------------------------
 
 
@@ -272,6 +299,7 @@ class Report:
     tool_version: str
     generated_at: datetime
     config: AnalysisConfig
+    filters: FilterSummary
     ingestion: IngestionSummary
     analysis: AnalysisResult
 

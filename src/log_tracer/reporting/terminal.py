@@ -21,6 +21,7 @@ from log_tracer.models import (
     CorrelationGroup,
     ErrorGroup,
     Event,
+    FilterSummary,
     Finding,
     IngestionSummary,
     Inspection,
@@ -88,6 +89,7 @@ def render_report(report: Report) -> RenderableType:
     parts: list[RenderableType] = [
         Text(_headline(report), style="bold"),
         _time_range(analysis.time_range),
+        *_filters(report.filters),
         Text(),
         *_findings(analysis.findings),
         Text(),
@@ -109,10 +111,15 @@ def render_top_errors(report: Report) -> RenderableType:
     )
     groups = report.analysis.top_errors
     if not groups:
-        return Text(f"No ERROR or CRITICAL events found in {scope}.")
+        return Group(
+            Text(f"No ERROR or CRITICAL events found in {scope}."), *_filters(report.filters)
+        )
     time_format = _time_formatter(report.analysis.time_range)
     return Group(
-        Text(f"Top errors in {scope}", style="bold"), Text(), *_error_list(groups, time_format)
+        Text(f"Top errors in {scope}", style="bold"),
+        *_filters(report.filters),
+        Text(),
+        *_error_list(groups, time_format),
     )
 
 
@@ -143,6 +150,25 @@ def _headline(report: Report) -> str:
             _plural(unparsed, "unparsed line"),
         ]
     )
+
+
+def _filters(summary: FilterSummary) -> list[RenderableType]:
+    """One line with the active filters, or nothing (D-9)."""
+    filters = summary.filters
+    parts: list[str] = []
+    if filters.services:
+        parts.append("service " + ", ".join(filters.services))
+    if filters.since is not None:
+        parts.append(f"since {_iso(filters.since)}")
+    if filters.until is not None:
+        parts.append(f"until {_iso(filters.until)}")
+    if not parts:
+        return []
+    excluded = f"{_plural(summary.excluded_events, 'event')} excluded"
+    if summary.excluded_without_timestamp:
+        excluded += f" ({summary.excluded_without_timestamp} without a timestamp)"
+    # Service names come from the command line, but may be shown with log content.
+    return [safe_text(" · ".join(["Filters: " + parts[0], *parts[1:], excluded]))]
 
 
 def _time_range(time_range: TimeRange | None) -> Text:
@@ -409,7 +435,8 @@ def _non_zero[K: (UnparsedReason, IssueCode)](counts: Mapping[K, int], order: It
 
 
 def _events(report: Report) -> int:
-    return sum(source.events for source in report.ingestion.sources)
+    """The events the rules saw, after the filters (D-19)."""
+    return sum(s.events for s in report.ingestion.sources) - report.filters.excluded_events
 
 
 def _plural(count: int, noun: str) -> str:

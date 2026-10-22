@@ -9,6 +9,7 @@ from log_tracer.ingestion.fields import (
     normalize_level,
     normalize_service,
     parse_duration_ms,
+    parse_time_bound,
     parse_timestamp,
 )
 from log_tracer.models import Level
@@ -165,3 +166,27 @@ def test_valid_durations_are_parsed(raw: str, expected: float) -> None:
 )
 def test_invalid_durations_return_none(raw: str) -> None:
     assert parse_duration_ms(raw) is None
+
+
+# --- Time bounds of --since and --until (D-18, D-20) ----------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("2026-10-16T14:03:22Z", datetime(2026, 10, 16, 14, 3, 22, tzinfo=UTC)),
+        ("2026-10-16T16:03:22+02:00", datetime(2026, 10, 16, 14, 3, 22, tzinfo=UTC)),
+        ("2026-10-16 14:03:22", datetime(2026, 10, 16, 14, 3, 22, tzinfo=UTC)),  # assumed UTC
+        ("2026-10-16", datetime(2026, 10, 16, tzinfo=UTC)),  # a date alone: midnight UTC
+        ("  2026-10-16  ", datetime(2026, 10, 16, tzinfo=UTC)),
+    ],
+)
+def test_time_bounds(raw: str, expected: datetime) -> None:
+    assert parse_time_bound(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw", ["", "yesterday", "2026-02-30", "2026-10-16T25:00:00Z", "20261016", "2026-10"]
+)
+def test_invalid_time_bounds(raw: str) -> None:
+    assert parse_time_bound(raw) is None

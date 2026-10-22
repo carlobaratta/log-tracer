@@ -33,6 +33,7 @@ TIMESTAMP_PATTERN: Final = (
 """Shape of an accepted timestamp. Explicit ``[0-9]`` excludes non-ASCII digits."""
 
 _TIMESTAMP_RE: Final = re.compile(TIMESTAMP_PATTERN)
+_DATE_RE: Final = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _ID_SENTINELS: Final = frozenset({"", "-", "null", "none", "n/a"})
 _ALL_ZEROS_RE: Final = re.compile(r"0+")
 _DURATION_RE: Final = re.compile(r"[0-9]+(?:\.[0-9]+)?")
@@ -81,6 +82,22 @@ def parse_timestamp(raw: str) -> ParsedTimestamp | None:
         # ValueError: impossible date or offset. OverflowError: the conversion
         # to UTC leaves the representable range (e.g. year 1 with a positive offset).
         return None
+
+
+def parse_time_bound(raw: str) -> datetime | None:
+    """Parse a bound of ``--since`` or ``--until`` (D-18, D-20).
+
+    It accepts the timestamps of the logs (without an offset, UTC is assumed)
+    and also a date alone, meaning midnight UTC.
+    """
+    value = raw.strip()
+    if _DATE_RE.fullmatch(value):
+        try:
+            return datetime.fromisoformat(value).replace(tzinfo=UTC)
+        except ValueError:  # a day that does not exist
+            return None
+    parsed = parse_timestamp(value)
+    return None if parsed is None else parsed.value
 
 
 def normalize_identifier(raw: str) -> str | None:

@@ -371,7 +371,7 @@ class Report:
     tool_version: str
     generated_at: datetime
     config: AnalysisConfig
-    filters: Filters
+    filters: FilterSummary  # criteri (Filters), eventi esclusi, avvisi
     ingestion: IngestionSummary  # riepiloghi e campioni, senza eventi
     analysis: AnalysisResult
 ```
@@ -381,6 +381,8 @@ Il `Report` non contiene gli eventi (REP-2): `IngestionResult` è composto da `e
 **Correlazione (`analysis.correlation`).** `correlate()` costruisce un *union-find* sui nodi `("request", id)` e `("trace", id)`: due nodi sono uniti quando compaiono nello stesso evento, e ogni componente connessa è una sequenza (COR-1). Lo spazio di nomi nel nodo tiene separati un request_id e un trace_id con lo stesso valore. Il costo è quasi lineare grazie all'unione per dimensione e alla compressione dei cammini. La partizione non dipende dall'ordine degli eventi: un test di proprietà la confronta con una visita in ampiezza scritta in modo indipendente nel test. `inspect` usa lo stesso risultato tramite `pipeline.run_inspect()`, che produce un `Inspection` (identificativo cercato, sequenze trovate, riepilogo degli input) senza eseguire le regole.
 
 **Stato (`state`).** `save()` scrive il report con `json_report.dumps` in un file temporaneo della stessa directory, poi lo rinomina su `last-report.json`: chi legge vede il report precedente o quello nuovo, mai uno scritto a metà (STA-1). `load()` legge il file e lo decodifica con `json_report.loads`, che ricostruisce il `Report` e solleva `ReportDecodeError` con il percorso del valore errato (ad esempio `inputs[0].sha256`); `state` la traduce in `StateError`. Senza PATH, `inspect` passa per `pipeline.run_inspect_saved()`, che rilegge le sorgenti salvate con il loro formato tramite `ingestion.ingest_files()` (D-16), e `pipeline.changed_sources()` confronta gli sha256 per l'avviso di STA-3.
+
+**Filtri (`pipeline.filter_events`).** Tra ingestion e analysis, `filter_events()` tiene gli eventi del perimetro (D-9) e restituisce un `FilterSummary` con i criteri normalizzati (servizi ordinati e senza duplicati, per NFR-2), il numero di eventi esclusi e gli avvisi `unmatched_service_filter`. Le regole ricevono solo gli eventi filtrati e non sanno che esistono filtri. Nel report gli avvisi compaiono nell'ordine degli stadi: ingestion, filtri, analisi. La CLI converte e valida le opzioni con `ingestion.fields.parse_time_bound()` prima di leggere i log.
 
 **Identificativo di un finding.** È l'hash SHA-256 di una chiave canonica, specifica di ogni regola (ad esempio `servizio + "\x1f" + impronta` per RUL-1). È stabile tra esecuzioni e permette di confrontare due report. Non si usa `hash()`, che in Python cambia da un'esecuzione all'altra.
 

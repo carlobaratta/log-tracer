@@ -30,8 +30,16 @@ from log_tracer.errors import (
     OutputError,
     StateError,
 )
-from log_tracer.ingestion.fields import normalize_identifier
-from log_tracer.models import DataWarning, InputFormat, Inspection, Report, Severity, WarningCode
+from log_tracer.ingestion.fields import normalize_identifier, normalize_service, parse_time_bound
+from log_tracer.models import (
+    DataWarning,
+    Filters,
+    InputFormat,
+    Inspection,
+    Report,
+    Severity,
+    WarningCode,
+)
 from log_tracer.pipeline import changed_sources, run_analysis, run_inspect, run_inspect_saved
 from log_tracer.reporting import json_report
 from log_tracer.reporting.terminal import (
@@ -113,6 +121,33 @@ OutputOption = Annotated[
         readable=False,
     ),
 ]
+ServiceOption = Annotated[
+    list[str] | None,
+    typer.Option(
+        "--service",
+        metavar="NAME",
+        help="Analyze only the events of this service (exact name); repeat it for several.",
+        show_default=False,
+    ),
+]
+SinceOption = Annotated[
+    str | None,
+    typer.Option(
+        "--since",
+        metavar="TS",
+        help="Analyze only events at or after this time (ISO 8601; UTC without an offset).",
+        show_default=False,
+    ),
+]
+UntilOption = Annotated[
+    str | None,
+    typer.Option(
+        "--until",
+        metavar="TS",
+        help="Analyze only events before this time (ISO 8601; UTC without an offset).",
+        show_default=False,
+    ),
+]
 StateDirOption = Annotated[
     Path,
     typer.Option(
@@ -160,13 +195,17 @@ def analyze(
         ),
     ] = None,
     config_path: ConfigOption = None,
+    services: ServiceOption = None,
+    since: SinceOption = None,
+    until: UntilOption = None,
     no_save: Annotated[
         bool, typer.Option("--no-save", help="Do not save the analysis for 'report' and 'inspect'.")
     ] = False,
     state_dir: StateDirOption = state.DEFAULT_DIRECTORY,
 ) -> None:
     """Analyze log files and print a summary (or the JSON report)."""
-    report = _run(paths, _load_config(config_path), input_format)
+    filters = _filters(services, since, until)
+    report = _run(paths, _load_config(config_path), input_format, filters)
     if not no_save:
         # Saved before stdout, even if --fail-on is reached later (D-17).
         with _exit_on_error():
@@ -203,15 +242,19 @@ def top_errors(
     output_format: FormatOption = OutputFormat.TEXT,
     input_format: InputFormatOption = InputFormatChoice.AUTO,
     config_path: ConfigOption = None,
+    services: ServiceOption = None,
+    since: SinceOption = None,
+    until: UntilOption = None,
 ) -> None:
     """Show the most frequent error groups (ERROR and CRITICAL events)."""
+    filters = _filters(services, since, until)
     config = _load_config(config_path)
     if limit is not None:
         # Precedence: command-line flag, then configuration file, then default.
         config = dataclasses.replace(
             config, report=dataclasses.replace(config.report, top_errors=limit)
         )
-    report = _run(paths, config, input_format)
+    report = _run(paths, config, input_format, filters)
     if output_format is OutputFormat.JSON:
         typer.echo(json_report.dumps_top_errors(report), nl=False)
     else:
@@ -299,15 +342,43 @@ def _load_config(path: Path | None) -> AnalysisConfig:
         return AnalysisConfig() if path is None else load_config(path)
 
 
-def _run(paths: list[Path], config: AnalysisConfig, input_format: InputFormatChoice) -> Report:
+def _filters(services: list[str] | None, since: str | None, until: str | None) -> Filters:
+    """Check the filter options before any log is read (D-20); errors exit with code 2."""
+    names: list[str] = []
+    for raw in services or ():
+        name = normalize_service(raw)
+        if name is None:
+            raise typer.BadParameter("a service name cannot be empty", param_hint="'--service'")
+        names.append(name)
+    lower, upper = _time_bound(since, "--since"), _time_bound(until, "--until")
+    if lower is not None and upper is not None and lower >= upper:
+        raise typer.BadParameter("--since must be earlier than --until", param_hint="'--until'")
+    return Filters(services=tuple(names), since=lower, until=upper)
+
+
+def _time_bound(raw: str | None, option: str) -> datetime | None:
+    if raw is None:
+        return None
+    value = parse_time_bound(raw)
+    if value is None:
+        raise typer.BadParameter(
+            f"{raw!r} is not an ISO 8601 date or date-time", param_hint=f"'{option}'"
+        )
+    return value
+
+
+def _run(
+    paths: list[Path], config: AnalysisConfig, input_format: InputFormatChoice, filters: Filters
+) -> Report:
     with _exit_on_error():
         report = run_analysis(
             paths,
             config=config,
             now=datetime.now(UTC),
             input_format=_input_format(input_format),
+            filters=filters,
         )
-    _print_warnings(report.ingestion.warnings)
+    _print_warnings((*report.ingestion.warnings, *report.filters.warnings))
     return report
 
 

@@ -10,6 +10,8 @@ from log_tracer.config import AnalysisConfig, HighLatencyConfig, LatencyThreshol
 from log_tracer.models import (
     CorrelationGroup,
     DataWarning,
+    Filters,
+    FilterSummary,
     InputFormat,
     SourceSummary,
     TimeRange,
@@ -33,6 +35,7 @@ def test_top_level_keys_are_present_in_a_fixed_order() -> None:  # REP-1
         "tool",
         "generated_at",
         "config",
+        "filters",
         "inputs",
         "skipped_files",
         "summary",
@@ -273,16 +276,10 @@ def test_naive_timestamps_are_rejected() -> None:
 def test_top_errors_document_has_metadata_inputs_and_groups() -> None:
     report = make_report()
     data = top_errors_to_dict(report)
-    assert list(data) == [
-        "schema_version",
-        "tool",
-        "generated_at",
-        "inputs",
-        "skipped_files",
-        "top_errors",
-    ]
+    keys = ["schema_version", "tool", "generated_at", "filters", "inputs", "skipped_files"]
+    assert list(data) == [*keys, "top_errors"]  # REP-5, D-21
     full = report_to_dict(report)
-    for key in ("schema_version", "tool", "generated_at", "inputs", "skipped_files", "top_errors"):
+    for key in [*keys, "top_errors"]:
         assert data[key] == full[key]
 
 
@@ -323,6 +320,55 @@ def test_analysis_warnings_follow_ingestion_warnings_with_a_null_path() -> None:
         },
         {"code": "large_correlation_group", "path": None, "message": "sequence x is huge"},
     ]
+
+
+# --- Filters (REP-1, D-9, D-19) ----------------------------------------------------------
+
+
+def test_no_filters_are_encoded_as_empty_values() -> None:
+    assert report_to_dict(make_report())["filters"] == {
+        "services": [],
+        "since": None,
+        "until": None,
+        "excluded_events": 0,
+        "excluded_without_timestamp": 0,
+    }
+
+
+def test_active_filters_and_the_events_in_scope() -> None:  # D-19
+    filters = FilterSummary(
+        Filters(services=("api", "payments"), since=at(0), until=at(60)),
+        excluded_events=3,
+        excluded_without_timestamp=1,
+        warnings=(),
+    )
+    data = report_to_dict(make_report(filters=filters))
+    assert data["filters"] == {
+        "services": ["api", "payments"],
+        "since": "2026-10-16T14:00:00.000000Z",
+        "until": "2026-10-16T14:01:00.000000Z",
+        "excluded_events": 3,
+        "excluded_without_timestamp": 1,
+    }
+    # inputs keep the raw count; the summary counts the events the rules saw.
+    assert isinstance(data["inputs"], list)
+    assert isinstance(data["inputs"][0], dict)
+    assert data["inputs"][0]["events"] == 7
+    assert isinstance(data["summary"], dict)
+    assert data["summary"]["events"] == 4
+
+
+def test_filter_warnings_sit_between_ingestion_and_analysis_warnings() -> None:
+    unmatched = DataWarning(WarningCode.UNMATCHED_SERVICE_FILTER, None, "no event has service 'x'")
+    huge = DataWarning(WarningCode.LARGE_CORRELATION_GROUP, None, "sequence x is huge")
+    filters = FilterSummary(Filters(services=("x",)), 7, 0, (unmatched,))
+    data_quality = report_to_dict(make_report(filters=filters, analysis_warnings=(huge,)))[
+        "data_quality"
+    ]
+    assert isinstance(data_quality, dict)
+    assert isinstance(data_quality["warnings"], list)
+    codes = [w["code"] for w in data_quality["warnings"] if isinstance(w, dict)]
+    assert codes == ["mostly_unparsed", "unmatched_service_filter", "large_correlation_group"]
 
 
 # --- inspect document (REP-6) -------------------------------------------------------------
