@@ -74,6 +74,17 @@ def discover(paths: Sequence[Path], *, input_format: InputFormat | None = None) 
     return Discovery(sources, tuple(sorted(set(skipped), key=lambda s: (s.path, s.reason))))
 
 
+def discover_files(files: Sequence[tuple[Path, InputFormat]]) -> Discovery:
+    """Validate files whose format is already known, such as the inputs of a
+    saved analysis (STA-3, D-16). Nothing is walked, so nothing is skipped."""
+    if not files:
+        raise InputError("no input files given")
+    for path, _format in files:
+        if not path.exists():
+            raise InputError(f"path not found: {path.as_posix()}")
+    return Discovery(_deduplicate([_explicit_file(path, chosen) for path, chosen in files]), ())
+
+
 def _explicit_file(path: Path, input_format: InputFormat | None) -> Source:
     display = path.as_posix()
     if not path.is_file():

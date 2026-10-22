@@ -4,7 +4,7 @@
 |---|---|
 | Stato | Bozza in revisione |
 | Versione software di riferimento | 0.1.0 |
-| Ultimo aggiornamento | 2026-10-16 |
+| Ultimo aggiornamento | 2026-10-22 |
 
 Questo documento descrive **come** è costruito Log Tracer: moduli, dipendenze, modello dei dati, gestione degli errori, test e CI.
 I requisiti a cui si fa riferimento (`ING-3`, `RUL-2`, …) sono definiti in [SPEC.md](SPEC.md).
@@ -60,7 +60,7 @@ log-tracer/
 │   ├── pipeline.py             # composizione ingestion → filtri → analysis → Report
 │   ├── state.py                # salvataggio e lettura di last-report.json
 │   ├── ingestion/
-│   │   ├── __init__.py         # ingest(paths, input_format) -> IngestionResult
+│   │   ├── __init__.py         # ingest(paths, input_format), ingest_files(files) -> IngestionResult
 │   │   ├── discovery.py        # percorsi → sorgenti con formato + file saltati
 │   │   ├── reader.py           # righe numerate, UTF-8/BOM/CRLF, sha256 incrementale
 │   │   ├── fields.py           # normalizzazione condivisa: livelli, timestamp, ID, durate
@@ -379,6 +379,8 @@ class Report:
 Il `Report` non contiene gli eventi (REP-2): `IngestionResult` è composto da `events` e da un `IngestionSummary` (sorgenti, conteggi, campioni), e nel report finisce solo quest'ultimo. `schema_version` non è un campo del modello: appartiene alla codifica JSON e la scrive `reporting.json_report`.
 
 **Correlazione (`analysis.correlation`).** `correlate()` costruisce un *union-find* sui nodi `("request", id)` e `("trace", id)`: due nodi sono uniti quando compaiono nello stesso evento, e ogni componente connessa è una sequenza (COR-1). Lo spazio di nomi nel nodo tiene separati un request_id e un trace_id con lo stesso valore. Il costo è quasi lineare grazie all'unione per dimensione e alla compressione dei cammini. La partizione non dipende dall'ordine degli eventi: un test di proprietà la confronta con una visita in ampiezza scritta in modo indipendente nel test. `inspect` usa lo stesso risultato tramite `pipeline.run_inspect()`, che produce un `Inspection` (identificativo cercato, sequenze trovate, riepilogo degli input) senza eseguire le regole.
+
+**Stato (`state`).** `save()` scrive il report con `json_report.dumps` in un file temporaneo della stessa directory, poi lo rinomina su `last-report.json`: chi legge vede il report precedente o quello nuovo, mai uno scritto a metà (STA-1). `load()` legge il file e lo decodifica con `json_report.loads`, che ricostruisce il `Report` e solleva `ReportDecodeError` con il percorso del valore errato (ad esempio `inputs[0].sha256`); `state` la traduce in `StateError`. Senza PATH, `inspect` passa per `pipeline.run_inspect_saved()`, che rilegge le sorgenti salvate con il loro formato tramite `ingestion.ingest_files()` (D-16), e `pipeline.changed_sources()` confronta gli sha256 per l'avviso di STA-3.
 
 **Identificativo di un finding.** È l'hash SHA-256 di una chiave canonica, specifica di ogni regola (ad esempio `servizio + "\x1f" + impronta` per RUL-1). È stabile tra esecuzioni e permette di confrontare due report. Non si usa `hash()`, che in Python cambia da un'esecuzione all'altra.
 

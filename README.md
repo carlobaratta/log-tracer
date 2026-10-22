@@ -2,7 +2,7 @@
 
 Log Tracer is a local, offline command-line tool for analyzing log files. It reads them, normalizes every line into a common event model, and reports recurring problems with deterministic, documented rules. The same input and configuration always produce the same report. It needs no network access, credentials, or external services.
 
-> **Status: early development (increment 6 of 10).** Log Tracer reads text and JSON Lines logs, from single files or whole directories, correlates events by `request_id` and `trace_id`, shows the timeline of a request, and applies four diagnostic rules, in the terminal or as JSON, with thresholds you can configure. Saved analyses (`report`) and filters come in later increments. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
+> **Status: early development (increment 7 of 10, in progress).** Log Tracer reads text and JSON Lines logs, from single files or whole directories, correlates events by `request_id` and `trace_id`, shows the timeline of a request, and applies four diagnostic rules, in the terminal or as JSON, with thresholds you can configure. The last analysis is saved, so it can be shown again with `report`. Filters by service and time come next. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
 
 ## Requirements
 
@@ -36,6 +36,8 @@ log-tracer analyze logs/ --fail-on high                   # exit code 1 if a fin
 log-tracer analyze logs/ --config log-tracer.toml         # custom thresholds
 log-tracer top-errors examples/logs/ --limit 5            # the most frequent errors only
 log-tracer inspect req-184 examples/logs/                 # timeline of one request or trace
+log-tracer report                                         # the last analysis again, without the logs
+log-tracer inspect req-184                                # timeline, from the inputs of the last analysis
 ```
 
 ```
@@ -98,6 +100,15 @@ Sequence 4bf92f3577b34da6 · 6 events · 4 services · 2.790 s
 
 Identifiers are matched exactly, including upper and lower case. Events are only ever linked through identifiers, never because they are close in time. The order across services follows the timestamps each service wrote, so it is a diagnostic hint, not proof of causality.
 
+### Saved analysis
+
+`analyze` saves its JSON report in `.log-tracer/last-report.json`, in the current directory. The file is replaced atomically, and the directory gets a `.gitignore` so that it never ends up in version control. Use `--no-save` to skip this, and `--state-dir DIR` (or the `LOG_TRACER_STATE_DIR` variable) to keep it elsewhere.
+
+- `report` shows the saved analysis again, as a summary or with `--format json`, without reading the logs. With `--output FILE` it also writes the JSON report to a file.
+- `inspect ID` without paths reads again the files of the saved analysis, each with the format it was analyzed with. If a file changed since then, a warning says so; if it no longer exists, the command stops.
+
+Only `analyze` writes the saved state.
+
 ### Configuration
 
 Thresholds come from a TOML file passed with `--config`. Nothing is read implicitly. Every key is optional and defaults to the value in [SPEC.md §7](SPEC.md#7-configurazione):
@@ -142,7 +153,7 @@ Error: log-tracer.toml: unknown key 'high_latency.warn' (did you mean 'warn_ms'?
 | 0 | Analysis completed, even if there are findings or unparsable lines |
 | 1 | `--fail-on` was given and a finding reached that severity |
 | 2 | Invalid command-line usage, or invalid `--config` file |
-| 3 | Input or output error: missing path, unsupported file type, directory without supported files, no readable file, `--output` file not writable |
+| 3 | Input, output or state error: missing path, unsupported file type, directory without supported files, no readable file, `--output` file not writable, no saved analysis (or one that cannot be read or saved) |
 | 4 | `inspect`: no event has that `request_id` or `trace_id` |
 | 70 | Internal error, which is a bug. A traceback is printed on stderr |
 

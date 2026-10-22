@@ -29,3 +29,7 @@ class NotFoundError(LogTracerError):
 
 class ConfigError(LogTracerError):
     """The configuration file cannot be read or contains an invalid value."""
+
+
+class StateError(LogTracerError):
+    """The saved analysis is missing, unreadable or incompatible, or cannot be written."""

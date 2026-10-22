@@ -4,7 +4,7 @@
 |---|---|
 | Stato | Bozza in revisione |
 | Versione software di riferimento | 0.1.0 |
-| Ultimo aggiornamento | 2026-10-16 |
+| Ultimo aggiornamento | 2026-10-22 |
 
 Questo documento descrive **cosa** fa Log Tracer v0.1.0 e come si comporta nei casi limite.
 Il **come** (moduli, dipendenze, modello dei dati, test, CI) è descritto in [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -306,7 +306,7 @@ Gli stessi gruppi alimentano anche la sezione `top_errors` del report (i primi `
 |---|---|---|
 | `log-tracer analyze PATH...` | Esegue l'analisi completa e stampa un riepilogo testuale o, con `--format json`, il report (§6). | Sì (§8) |
 | `log-tracer top-errors PATH...` | Mostra solo gli errori più frequenti, come elenco o, con `--format json`, come documento JSON ridotto (REP-5). | No |
-| `log-tracer inspect ID [PATH...]` | Mostra la timeline del gruppo che contiene l'ID, cercato sia come request_id sia come trace_id (COR-8, COR-9). Senza PATH usa gli input dell'ultima analisi salvata; finché lo stato persistente non è disponibile (§8), PATH è obbligatorio. | No |
+| `log-tracer inspect ID [PATH...]` | Mostra la timeline del gruppo che contiene l'ID, cercato sia come request_id sia come trace_id (COR-8, COR-9). Senza PATH usa gli input dell'ultima analisi salvata (STA-3). | No |
 | `log-tracer report` | Mostra o esporta il report dell'ultima analisi salvata, senza rieseguirla. | No |
 | `log-tracer --version` | Stampa la versione. | No |
 
@@ -430,6 +430,8 @@ critical_ms = 2700
 - **STA-3** Senza PATH, `inspect` rilegge le sorgenti elencate in `inputs` del report salvato, risolvendole rispetto alla directory corrente. Se lo sha256 di una sorgente è cambiato, stampa un avviso su stderr. Se una sorgente non esiste più, termina con codice 3.
 - **STA-4** Solo `analyze` scrive lo stato.
 
+Il report salvato è lo stesso documento di `--format json`. `report` lo decodifica e lo ricodifica, quindi `report --format json` produce gli stessi byte che `analyze --format json` aveva stampato (D-14). Sono accettate tutte le versioni minori dello schema `1.x`; le chiavi sconosciute sono ignorate. Un report salvato danneggiato (JSON non valido, chiave mancante, valore di tipo sbagliato) è trattato come incompatibile: codice 3, con il percorso del valore errato e il suggerimento di rieseguire `analyze`.
+
 ---
 
 ## 9. Gestione degli errori
@@ -509,6 +511,10 @@ Gli errori di contenuto (righe e campi) non interrompono mai l'analisi. Gli erro
 | D-11 | Il formato predefinito di stdout è `text`; il JSON si ottiene con `--format json` o `--output` | Uno strumento da terminale si legge da una persona; il JSON resta completo e stabile per i programmi. | JSON come predefinito: illeggibile a colpo d'occhio. |
 | D-12 | `--fail-on` e `--output` anticipati all'incremento 3 | Dipendono solo da componenti già presenti e completano i codici di uscita (tranne il 4, legato a `inspect`). | Rimandarli all'incremento 7. |
 | D-13 | RUL-3 misura l'incertezza con `undetermined_groups` invece di `excluded_without_timestamp` | Conta l'incertezza proprio sulla coppia warning→errore del finding, inclusi i timestamp uguali in file diversi (COR-4). | Contare gli eventi senza timestamp, un dato poco legato al finding. |
+| D-14 | `report --format json` ricodifica il report decodificato invece di copiare il file | L'output resta canonico ed è validato a ogni lettura; un test verifica che decode ed encode siano inversi. | Copiare i byte del file: un file danneggiato arriverebbe su stdout senza errori. |
+| D-15 | `has_critical` di un gruppo di errori, assente dal report, si ricostruisce dal finding `recurring_error` dello stesso gruppo; senza finding vale falso | Serve solo a calcolare la severità di RUL-1, che è già nel finding; lo schema resta invariato. | Aggiungere `has_critical` a `top_errors`, cambiando lo schema. |
+| D-16 | `inspect` senza PATH rilegge ogni sorgente con il formato salvato in `inputs[].format`; un `--input-format` esplicito lo sostituisce | Un'analisi fatta con `--input-format jsonl` su file `.log` resta coerente quando la si ispeziona. | Scegliere di nuovo il formato per estensione. |
+| D-17 | `analyze` salva lo stato dopo `--output` e prima di stampare su stdout, anche quando poi scatta `--fail-on`; se il salvataggio fallisce esce con codice 3 senza stampare | Come per `--output`, nessun output parziale; `--fail-on` riguarda l'esito, non il salvataggio. | Salvare dopo la stampa: stdout completo ma codice 3, ambiguo per uno script. |
 
 ## 13. Questioni aperte
 

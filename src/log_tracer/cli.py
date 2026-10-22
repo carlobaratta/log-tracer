@@ -20,7 +20,7 @@ import typer
 from rich.console import Console
 from rich.text import Text
 
-from log_tracer import __version__
+from log_tracer import __version__, state
 from log_tracer.config import AnalysisConfig, load_config
 from log_tracer.errors import (
     ConfigError,
@@ -28,10 +28,11 @@ from log_tracer.errors import (
     LogTracerError,
     NotFoundError,
     OutputError,
+    StateError,
 )
 from log_tracer.ingestion.fields import normalize_identifier
-from log_tracer.models import DataWarning, InputFormat, Report, Severity, WarningCode
-from log_tracer.pipeline import run_analysis, run_inspect
+from log_tracer.models import DataWarning, InputFormat, Inspection, Report, Severity, WarningCode
+from log_tracer.pipeline import changed_sources, run_analysis, run_inspect, run_inspect_saved
 from log_tracer.reporting import json_report
 from log_tracer.reporting.terminal import (
     render_report,
@@ -78,6 +79,14 @@ Paths = Annotated[
         readable=False,
     ),
 ]
+OptionalPaths = Annotated[
+    list[Path] | None,
+    typer.Argument(
+        help="Log files or directories; without them, the inputs of the saved analysis.",
+        show_default=False,
+        readable=False,
+    ),
+]
 FormatOption = Annotated[
     OutputFormat,
     typer.Option("--format", help="'text' for a terminal summary, 'json' for the full report."),
@@ -94,6 +103,20 @@ InputFormatOption = Annotated[
     InputFormatChoice,
     typer.Option(
         "--input-format", help="Parser to use for every file; 'auto' chooses it by file extension."
+    ),
+]
+OutputOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--output",
+        help="Also write the JSON report to this file, whatever --format is.",
+        readable=False,
+    ),
+]
+StateDirOption = Annotated[
+    Path,
+    typer.Option(
+        "--state-dir", envvar="LOG_TRACER_STATE_DIR", help="Directory of the saved analysis."
     ),
 ]
 
@@ -129,14 +152,7 @@ def analyze(
     paths: Paths,
     output_format: FormatOption = OutputFormat.TEXT,
     input_format: InputFormatOption = InputFormatChoice.AUTO,
-    output: Annotated[
-        Path | None,
-        typer.Option(
-            "--output",
-            help="Also write the JSON report to this file, whatever --format is.",
-            readable=False,
-        ),
-    ] = None,
+    output: OutputOption = None,
     fail_on: Annotated[
         FailOn | None,
         typer.Option(
@@ -144,20 +160,32 @@ def analyze(
         ),
     ] = None,
     config_path: ConfigOption = None,
+    no_save: Annotated[
+        bool, typer.Option("--no-save", help="Do not save the analysis for 'report' and 'inspect'.")
+    ] = False,
+    state_dir: StateDirOption = state.DEFAULT_DIRECTORY,
 ) -> None:
     """Analyze log files and print a summary (or the JSON report)."""
     report = _run(paths, _load_config(config_path), input_format)
-    report_json = json_report.dumps(report)
-    if output is not None:
-        # Written before stdout: if this fails, nothing partial is printed.
+    if not no_save:
+        # Saved before stdout, even if --fail-on is reached later (D-17).
         with _exit_on_error():
-            _write(output, report_json)
-    if output_format is OutputFormat.JSON:
-        typer.echo(report_json, nl=False)
-    else:
-        _stdout().print(render_report(report))
+            state.save(report, state_dir)
+    _print_report(report, output_format, output)
     if fail_on is not None:
         _exit_if_findings_reach(report, fail_on)
+
+
+@app.command("report")
+def report_command(
+    output_format: FormatOption = OutputFormat.TEXT,
+    output: OutputOption = None,
+    state_dir: StateDirOption = state.DEFAULT_DIRECTORY,
+) -> None:
+    """Show the saved analysis again, without reading the logs."""
+    with _exit_on_error():
+        report = state.load(state_dir)
+    _print_report(report, output_format, output)
 
 
 @app.command("top-errors")
@@ -200,9 +228,10 @@ def inspect_command(
             show_default=False,
         ),
     ],
-    paths: Paths,
+    paths: OptionalPaths = None,
     output_format: FormatOption = OutputFormat.TEXT,
     input_format: InputFormatOption = InputFormatChoice.AUTO,
+    state_dir: StateDirOption = state.DEFAULT_DIRECTORY,
 ) -> None:
     """Show the timeline of the sequence that contains a request_id or trace_id."""
     query = normalize_identifier(identifier)
@@ -212,15 +241,7 @@ def inspect_command(
             f"{identifier.strip()!r} means 'no identifier' in logs and cannot be searched for",
             param_hint="ID",
         )
-    with _exit_on_error():
-        inspection = run_inspect(
-            paths,
-            query,
-            config=AnalysisConfig(),
-            now=datetime.now(UTC),
-            input_format=_input_format(input_format),
-        )
-    _print_warnings(inspection.ingestion.warnings)
+    inspection = _inspect(query, paths, _input_format(input_format), state_dir)
     with _exit_on_error():
         if not inspection.groups:
             raise NotFoundError(
@@ -234,6 +255,43 @@ def inspect_command(
 
 
 # --- Helpers ---------------------------------------------------------------------------
+
+
+def _inspect(
+    query: str, paths: list[Path] | None, input_format: InputFormat | None, state_dir: Path
+) -> Inspection:
+    now = datetime.now(UTC)
+    if paths:
+        with _exit_on_error():
+            inspection = run_inspect(
+                paths, query, config=AnalysisConfig(), now=now, input_format=input_format
+            )
+        _print_warnings(inspection.ingestion.warnings)
+        return inspection
+    # Without paths: the inputs of the saved analysis, read again (STA-3).
+    with _exit_on_error():
+        saved = state.load(state_dir)
+        inspection = run_inspect_saved(saved, query, now=now, input_format=input_format)
+    _print_warnings(inspection.ingestion.warnings)
+    for path in changed_sources(saved.ingestion, inspection.ingestion):
+        _say(
+            "Warning",
+            "yellow",
+            f"{path} has changed since the saved analysis; the timeline shows its current content",
+        )
+    return inspection
+
+
+def _print_report(report: Report, output_format: OutputFormat, output: Path | None) -> None:
+    report_json = json_report.dumps(report)
+    if output is not None:
+        # Written before stdout: if this fails, nothing partial is printed.
+        with _exit_on_error():
+            _write(output, report_json)
+    if output_format is OutputFormat.JSON:
+        typer.echo(report_json, nl=False)
+    else:
+        _stdout().print(render_report(report))
 
 
 def _load_config(path: Path | None) -> AnalysisConfig:
@@ -286,7 +344,7 @@ def _exit_on_error() -> Iterator[None]:
     except ConfigError as error:
         _print_error(error)
         raise typer.Exit(ExitCode.USAGE) from error
-    except (InputError, OutputError) as error:
+    except (InputError, OutputError, StateError) as error:
         _print_error(error)
         raise typer.Exit(ExitCode.INPUT) from error
     except NotFoundError as error:

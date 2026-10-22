@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from log_tracer.errors import InputError
-from log_tracer.ingestion import ingest
+from log_tracer.ingestion import ingest, ingest_files
 from log_tracer.models import (
     DataWarning,
     InputFormat,
@@ -207,6 +207,26 @@ def test_input_format_forces_the_parser(workdir: Path) -> None:
     (source,) = result.summary.sources
     assert source.format is InputFormat.JSONL
     assert [e.message for e in result.events] == ["json event"]
+
+
+def test_files_with_known_formats_keep_their_own_parser(workdir: Path) -> None:  # STA-3, D-16
+    write(workdir / "app.log", JSON_LINES)
+    write(workdir / "other.log", "2026-10-16T14:00:00Z INFO [api] text event\n")
+    result = ingest_files(
+        [(Path("other.log"), InputFormat.TEXT), (Path("app.log"), InputFormat.JSONL)],
+        max_samples=10,
+    )
+    assert [(s.path, s.format) for s in result.summary.sources] == [
+        ("app.log", InputFormat.JSONL),
+        ("other.log", InputFormat.TEXT),
+    ]
+    assert sorted(e.message for e in result.events) == ["json event", "text event"]
+    assert result.summary.skipped == ()
+
+
+def test_files_with_known_formats_must_exist(workdir: Path) -> None:
+    with pytest.raises(InputError, match=r"^path not found: gone\.log$"):
+        ingest_files([(Path("gone.log"), InputFormat.TEXT)], max_samples=10)
 
 
 def test_an_encoding_issue_is_counted_once_per_event(workdir: Path) -> None:

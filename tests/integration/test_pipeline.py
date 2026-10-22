@@ -6,8 +6,9 @@ import pytest
 
 from log_tracer import __version__
 from log_tracer.config import AnalysisConfig, RecurringErrorConfig
-from log_tracer.models import RuleName, Severity
-from log_tracer.pipeline import run_analysis
+from log_tracer.errors import StateError
+from log_tracer.models import InputFormat, RuleName, Severity
+from log_tracer.pipeline import changed_sources, run_analysis, run_inspect_saved
 from log_tracer.reporting.json_report import dumps
 from tests.factories import T0
 
@@ -66,3 +67,44 @@ def test_report_is_identical_across_runs_and_argument_orders(logs: list[Path]) -
     again = dumps(run_analysis(logs, config=AnalysisConfig(), now=T0))
     reversed_order = dumps(run_analysis(logs[::-1], config=AnalysisConfig(), now=T0))
     assert first == again == reversed_order
+
+
+# --- inspect without paths (STA-3) ------------------------------------------------------
+
+
+def test_saved_inputs_are_read_again(logs: list[Path]) -> None:  # STA-3
+    saved = run_analysis(logs, config=AnalysisConfig(), now=T0)
+    inspection = run_inspect_saved(saved, "r1", now=T0)
+    (group,) = inspection.groups
+    assert [(e.ref.path, e.ref.line) for e in group.events] == [("api.log", 1), ("api.log", 2)]
+    assert changed_sources(saved.ingestion, inspection.ingestion) == ()
+
+
+def test_saved_format_is_used_unless_overridden(tmp_path: Path, logs: list[Path]) -> None:
+    # D-16: a .log file analyzed as JSON Lines is read again as JSON Lines.
+    (tmp_path / "events.log").write_text('{"msg": "hello", "request_id": "j1"}\n', "utf-8")
+    saved = run_analysis(
+        [Path("events.log")], config=AnalysisConfig(), now=T0, input_format=InputFormat.JSONL
+    )
+    assert len(run_inspect_saved(saved, "j1", now=T0).groups) == 1
+    forced = run_inspect_saved(saved, "j1", now=T0, input_format=InputFormat.TEXT)
+    assert forced.groups == ()
+
+
+def test_changed_sources_are_listed(logs: list[Path]) -> None:  # STA-3
+    saved = run_analysis(logs, config=AnalysisConfig(), now=T0)
+    with Path("worker.log").open("a", encoding="utf-8") as stream:
+        stream.write("2026-10-16T14:00:10Z INFO [db] recovered\n")
+    inspection = run_inspect_saved(saved, "r1", now=T0)
+    assert changed_sources(saved.ingestion, inspection.ingestion) == ("worker.log",)
+
+
+def test_missing_saved_source_is_a_state_error(logs: list[Path]) -> None:  # STA-3
+    saved = run_analysis(logs, config=AnalysisConfig(), now=T0)
+    Path("worker.log").unlink()
+    with pytest.raises(StateError) as excinfo:
+        run_inspect_saved(saved, "r1", now=T0)
+    assert str(excinfo.value) == "worker.log, listed in the saved analysis, no longer exists"
+    assert excinfo.value.hint == (
+        "pass the log paths to inspect, or run 'log-tracer analyze PATH' again"
+    )

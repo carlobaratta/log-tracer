@@ -13,7 +13,7 @@ from types import MappingProxyType
 from typing import Final
 
 from log_tracer.errors import InputError
-from log_tracer.ingestion.discovery import Source, discover
+from log_tracer.ingestion.discovery import Discovery, Source, discover, discover_files
 from log_tracer.ingestion.jsonl_format import parse_jsonl_line
 from log_tracer.ingestion.reader import DigestingReader
 from log_tracer.ingestion.text_format import parse_text_line
@@ -32,7 +32,7 @@ from log_tracer.models import (
     WarningCode,
 )
 
-__all__ = ["ingest"]
+__all__ = ["ingest", "ingest_files"]
 
 _PARSERS: Final[Mapping[InputFormat, Callable[[str, SourceRef], LineOutcome]]] = {
     InputFormat.TEXT: parse_text_line,
@@ -58,7 +58,15 @@ def ingest(
     (ING-2). ``max_samples`` caps the unparsed lines kept as examples; all of
     them are counted regardless.
     """
-    discovery = discover(paths, input_format=input_format)
+    return _ingest(discover(paths, input_format=input_format), max_samples)
+
+
+def ingest_files(files: Sequence[tuple[Path, InputFormat]], *, max_samples: int) -> IngestionResult:
+    """Like :func:`ingest`, for files whose format is already known (STA-3, D-16)."""
+    return _ingest(discover_files(files), max_samples)
+
+
+def _ingest(discovery: Discovery, max_samples: int) -> IngestionResult:
     results = [_ingest_source(source, max_samples) for source in discovery.sources]
     if all(result.summary.error is not None for result in results):
         details = "; ".join(f"{r.summary.path}: {r.summary.error}" for r in results)

@@ -44,6 +44,8 @@ LAYERS: dict[str, Layer] = {
     "log_tracer.pipeline": Layer(
         internal=(*CORE, "log_tracer.__version__", "log_tracer.ingestion", "log_tracer.analysis")
     ),
+    # The saved state is a report: it is encoded and decoded by json_report.
+    "log_tracer.state": Layer(internal=(*CORE, "log_tracer.reporting.json_report")),
     # The CLI is the composition root: it may use every layer, and it is the
     # only module allowed to import Typer.
     "log_tracer.cli": Layer(internal=ANYTHING, third_party=("typer", "rich")),
@@ -122,6 +124,7 @@ def test_imports_respect_the_layer_rules(module: str) -> None:
         ("rich.console", LAYERS["log_tracer.models"], False),
         ("rich.console", LAYERS["log_tracer.reporting"], False),
         ("rich.table", LAYERS["log_tracer.reporting.terminal"], True),
+        ("log_tracer.reporting.terminal", LAYERS["log_tracer.state"], False),
         ("datetime.UTC", LAYERS["log_tracer.models"], True),
     ],
 )

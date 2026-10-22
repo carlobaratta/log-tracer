@@ -108,8 +108,10 @@ def test_identifiers_that_mean_absent_are_a_usage_error(query: str) -> None:
     assert "means 'no identifier'" in result.stderr
 
 
-def test_paths_are_required_for_now() -> None:
-    assert invoke("req-184").exit_code == 2
+def test_without_paths_and_without_a_saved_analysis(in_tmp: Path) -> None:  # STA-3
+    result = invoke("req-184")
+    assert result.exit_code == 3
+    assert result.stderr.startswith("Error: no saved analysis in ")
 
 
 def test_missing_path_exits_with_code_3(in_tmp: Path) -> None:
