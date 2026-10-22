@@ -174,7 +174,12 @@ def test_p95_satisfies_the_nearest_rank_definition(values: list[float]) -> None:
 # --- Through analyze() -------------------------------------------------------------------------
 
 
-def test_analyze_runs_both_rules_in_a_fixed_order() -> None:
+def test_analyze_runs_the_rules_in_a_fixed_order() -> None:
     result = analyze(durations(1500, 2500), AnalysisConfig())
-    assert [o.rule for o in result.rules] == [RuleName.RECURRING_ERROR, RuleName.HIGH_LATENCY]
+    assert [(o.rule, o.status) for o in result.rules] == [
+        (RuleName.RECURRING_ERROR, "ok"),
+        (RuleName.HIGH_LATENCY, "ok"),
+        (RuleName.WARNING_BEFORE_ERROR, "skipped"),  # no correlated error
+        (RuleName.ERROR_SPIKE, "skipped"),  # a single window
+    ]
     assert [f.rule for f in result.findings] == [RuleName.HIGH_LATENCY]

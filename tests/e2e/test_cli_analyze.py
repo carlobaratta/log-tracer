@@ -201,7 +201,40 @@ def test_examples_directory_combines_text_and_json_lines() -> None:
         ("inventory", 1, 4, 1320.0, 1320.0, "medium"),
         ("orders-db", 1, 1, 1840.0, 1840.0, "medium"),
     }
-    assert len(report["findings"]) == 7
+    # RUL-3, computed from the files by hand: in req-184, req-187 and req-188 the
+    # payments warning precedes the payments timeout by 2492, 2502 and 2503 ms.
+    (precursor,) = [f for f in report["findings"] if f["rule"] == "warning_before_error"]
+    assert precursor["severity"] == "medium"
+    assert precursor["evidence"] == {
+        "warning_service": "payments",
+        "warning_fingerprint": "Payment provider slow, retrying",
+        "error_service": "payments",
+        "error_fingerprint": "Payment gateway timeout after <num> ms",
+        "groups": 3,
+        "median_gap_ms": 2502.0,
+        "undetermined_groups": 0,
+    }
+    assert [(e["path"], e["line"]) for e in precursor["events"]] == [
+        ("examples/logs/sample.log", 4),
+        ("examples/logs/sample.log", 5),
+        ("examples/logs/sample.log", 17),
+        ("examples/logs/sample.log", 18),
+        ("examples/logs/sample.log", 24),
+        ("examples/logs/sample.log", 25),
+    ]
+    assert precursor["correlation_ids"] == [
+        "4bf92f3577b34da6",
+        "c3d4e5f6a7b8c9d0",
+        "e5f6a7b8c9d0e1f2",
+    ]
+    # RUL-4: errors per minute 2, 5, 2, 1 -> median 2, threshold 6 -> no spike.
+    assert [(r["rule"], r["status"]) for r in report["rules"]] == [
+        ("recurring_error", "ok"),
+        ("high_latency", "ok"),
+        ("warning_before_error", "ok"),
+        ("error_spike", "ok"),
+    ]
+    assert len(report["findings"]) == 8
 
 
 def test_input_format_reads_a_log_file_as_json_lines(in_tmp: Path) -> None:
@@ -375,7 +408,13 @@ def test_text_summary_of_the_examples() -> None:
     lines = [line.strip() for line in out.splitlines()]
     assert lines[0] == "Log Tracer 0.1.0 · 2 files · 34 events · 3 unparsed lines"
     assert "Time range (UTC): 2026-10-16T14:03:21.004Z → 2026-10-16T14:06:02.011Z" in lines
-    assert "Findings (7)" in lines
+    assert "Findings (8)" in lines
+    assert [
+        "medium",
+        "warning_before_error",
+        "Warning before error in 3 sequences: Payment provider slow, retrying…",
+        "6",
+    ] in cells(out)
     assert [
         "medium",
         "high_latency",
@@ -452,7 +491,7 @@ def test_fail_on_exits_with_code_1_after_printing_the_output(threshold: str) -> 
     assert result.exit_code == 1
     assert result.stdout.startswith("Log Tracer")
     assert result.stderr == (
-        f"Found 7 findings with severity {threshold} or higher (--fail-on {threshold})\n"
+        f"Found 8 findings with severity {threshold} or higher (--fail-on {threshold})\n"
     )
 
 
@@ -460,7 +499,7 @@ def test_fail_on_exits_with_code_1_after_printing_the_output(threshold: str) -> 
 def test_fail_on_keeps_stdout_valid_json() -> None:
     result = invoke("analyze", "examples/logs", "--format", "json", "--fail-on", "medium")
     assert result.exit_code == 1
-    assert len(json.loads(result.stdout)["findings"]) == 7
+    assert len(json.loads(result.stdout)["findings"]) == 8
 
 
 @pytest.mark.usefixtures("in_repo")
@@ -490,7 +529,7 @@ def test_configuration_file_changes_the_thresholds() -> None:
         ("inventory", 1, 4, 1320.0, 1320.0, "medium"),
         ("orders-db", 1, 1, 1840.0, 1840.0, "medium"),
     }
-    assert len(report["findings"]) == 6
+    assert len(report["findings"]) == 7
     assert report["config"]["high_latency"]["services"] == {
         "api-gateway": {"warn_ms": 1000, "critical_ms": 2700},
         "payments": {"warn_ms": 3000, "critical_ms": 5000},
@@ -545,3 +584,35 @@ def test_configuration_is_checked_before_reading_the_logs(in_tmp: Path) -> None:
     result = invoke("analyze", "missing.log", "--config", "cfg.toml")
     assert result.exit_code == 2
     assert result.stderr.startswith("Error: cfg.toml: unknown key 'bogus'")
+
+
+# --- error_spike end to end (RUL-4) ------------------------------------------------------
+
+
+def write_spike_log(directory: Path) -> None:
+    """One error per minute for ten minutes, except twelve in minute 5."""
+    lines = [
+        f"2026-10-16T14:{minute:02d}:{second:02d}Z ERROR [api] upstream failure\n"
+        for minute in range(10)
+        for second in range(12 if minute == 5 else 1)
+    ]
+    (directory / "spike.log").write_text("".join(lines), encoding="utf-8")
+
+
+def test_error_spike_is_reported(in_tmp: Path) -> None:
+    write_spike_log(in_tmp)
+    report = report_of(invoke("analyze", "spike.log", "--format", "json"))
+    (spike,) = [f for f in report["findings"] if f["rule"] == "error_spike"]
+    # Median of [1, 1, 1, 1, 1, 12, 1, 1, 1, 1] is 1 -> threshold max(5, 3 * 1) = 5.
+    assert spike["severity"] == "high"  # 12 >= 2 * 5
+    assert spike["title"] == "Error spike from 2026-10-16T14:05:00Z: 12 errors in 60 s"
+    assert spike["evidence"]["start"] == "2026-10-16T14:05:00.000000Z"
+    assert (spike["evidence"]["baseline"], spike["evidence"]["threshold"]) == (1.0, 5.0)
+
+
+def test_error_spike_parameters_come_from_the_configuration(in_tmp: Path) -> None:
+    write_spike_log(in_tmp)
+    (in_tmp / "cfg.toml").write_text("[error_spike]\nmin_errors = 15\n", encoding="utf-8")
+    report = report_of(invoke("analyze", "spike.log", "--format", "json", "--config", "cfg.toml"))
+    assert [f for f in report["findings"] if f["rule"] == "error_spike"] == []
+    assert report["config"]["error_spike"] == {"window_s": 60, "factor": 3.0, "min_errors": 15}

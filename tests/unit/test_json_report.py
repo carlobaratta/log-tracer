@@ -52,6 +52,8 @@ def test_metadata_and_configuration() -> None:
         "report": {"max_examples": 10, "top_errors": 10},
         "recurring_error": {"min_occurrences": 3, "high_count": 20},
         "high_latency": {"warn_ms": 1000, "critical_ms": 5000, "services": {}},
+        "warning_before_error": {"medium_min_groups": 3},
+        "error_spike": {"window_s": 60, "factor": 3.0, "min_errors": 5},
     }
 
 

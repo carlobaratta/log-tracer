@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Final
 
-from log_tracer.models import ErrorGroup, Event, RuleName, SourceRef
+from log_tracer.models import CorrelationGroup, ErrorGroup, Event, RuleName, SourceRef
 
 _NO_LABELS: Final[Mapping[SourceRef, str]] = MappingProxyType({})
 
@@ -22,6 +22,8 @@ class AnalysisContext:
     max_examples: int
     label_of: Mapping[SourceRef, str] = _NO_LABELS
     """The sequence label of every correlated event (COR-1)."""
+    sequences: tuple[CorrelationGroup, ...] = ()
+    """Correlated sequences, sorted by label, events in timeline order."""
 
 
 def finding_id(rule: RuleName, *key: str | None) -> str:

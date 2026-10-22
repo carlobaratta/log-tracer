@@ -2,7 +2,7 @@
 
 Log Tracer is a local, offline command-line tool for analyzing log files. It reads them, normalizes every line into a common event model, and reports recurring problems with deterministic, documented rules. The same input and configuration always produce the same report. It needs no network access, credentials, or external services.
 
-> **Status: early development (increment 5 of 10).** Today Log Tracer reads text and JSON Lines logs, from single files or whole directories, correlates events by `request_id` and `trace_id`, shows the timeline of a request, and reports recurring errors and high latencies, in the terminal or as JSON, with thresholds you can configure. The remaining rules (warnings before errors, error spikes) come in later increments. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
+> **Status: early development (increment 6 of 10).** Log Tracer reads text and JSON Lines logs, from single files or whole directories, correlates events by `request_id` and `trace_id`, shows the timeline of a request, and applies four diagnostic rules, in the terminal or as JSON, with thresholds you can configure. Saved analyses (`report`) and filters come in later increments. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
 
 ## Requirements
 
@@ -64,6 +64,19 @@ Output on stdout is either the summary or a single JSON document, so you can pip
 
 Unparsable lines are counted and reported, never silently dropped.
 
+### Diagnostic rules
+
+Every rule is deterministic and documented in [SPEC.md §4](SPEC.md#4-regole-diagnostiche); its findings carry the evidence that justifies them.
+
+| Rule | Finds | Severity |
+|---|---|---|
+| `recurring_error` | The same error pattern (message with ids and numbers masked) seen at least 3 times in a service | medium; high from 20 occurrences or with a CRITICAL event |
+| `high_latency` | Events of a service whose `duration_ms` is above 1000 ms | medium; high above 5000 ms |
+| `warning_before_error` | A warning that precedes the first error of a correlated sequence | low; medium from 3 sequences |
+| `error_spike` | Fixed 60 s windows with at least max(5, 3 × median) errors | medium; high at twice the threshold |
+
+A warning that precedes an error is reported as a temporal correlation, never as proven causation. All thresholds can be changed with `--config` (see below).
+
 ### Request timelines
 
 Events that share a `request_id` or a `trace_id` (directly, or through other events) form a *sequence*, even across files and formats. `inspect` shows one in time order:
@@ -104,6 +117,14 @@ critical_ms = 5000         # strictly above this, the finding is high
 
 [high_latency.services.payments]
 warn_ms = 3000             # per-service thresholds; missing ones are inherited
+
+[warning_before_error]
+medium_min_groups = 3      # sequences needed for a medium finding
+
+[error_spike]
+window_s = 60              # window length in seconds, aligned to the Unix epoch
+factor = 3.0               # a spike has at least factor x median errors...
+min_errors = 5             # ...and never fewer than this
 ```
 
 The file is validated strictly, before any log is read. An unknown key, a value of the wrong type or an inconsistent pair (such as `critical_ms` not above `warn_ms`) stops the command with exit code 2 and names the key:

@@ -53,15 +53,35 @@ class HighLatencyConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class WarningBeforeErrorConfig:
+    medium_min_groups: int = 3
+
+
+@dataclass(frozen=True, slots=True)
+class ErrorSpikeConfig:
+    window_s: int = 60
+    factor: float = 3.0
+    min_errors: int = 5
+
+
+@dataclass(frozen=True, slots=True)
 class AnalysisConfig:
     report: ReportConfig = field(default_factory=ReportConfig)
     recurring_error: RecurringErrorConfig = field(default_factory=RecurringErrorConfig)
     high_latency: HighLatencyConfig = field(default_factory=HighLatencyConfig)
+    warning_before_error: WarningBeforeErrorConfig = field(default_factory=WarningBeforeErrorConfig)
+    error_spike: ErrorSpikeConfig = field(default_factory=ErrorSpikeConfig)
 
 
 # --- Loading ----------------------------------------------------------------------------
 
-_SECTIONS: Final = ("report", "recurring_error", "high_latency")
+_SECTIONS: Final = (
+    "report",
+    "recurring_error",
+    "high_latency",
+    "warning_before_error",
+    "error_spike",
+)
 _LATENCY_KEYS: Final = ("warn_ms", "critical_ms")
 
 
@@ -91,9 +111,13 @@ def parse_config(data: Mapping[str, object], *, source: str) -> AnalysisConfig:
     report = check.table(data, "report")
     recurring = check.table(data, "recurring_error")
     latency = check.table(data, "high_latency")
+    precursors = check.table(data, "warning_before_error")
+    spikes = check.table(data, "error_spike")
     check.known_keys(report, ("max_examples", "top_errors"), prefix="report.")
     check.known_keys(recurring, ("min_occurrences", "high_count"), prefix="recurring_error.")
     check.known_keys(latency, (*_LATENCY_KEYS, "services"), prefix="high_latency.")
+    check.known_keys(precursors, ("medium_min_groups",), prefix="warning_before_error.")
+    check.known_keys(spikes, ("window_s", "factor", "min_errors"), prefix="error_spike.")
 
     defaults = AnalysisConfig()
     report_config = ReportConfig(
@@ -120,6 +144,25 @@ def parse_config(data: Mapping[str, object], *, source: str) -> AnalysisConfig:
         report=report_config,
         recurring_error=recurring_config,
         high_latency=_latency(check, latency, defaults.high_latency),
+        warning_before_error=WarningBeforeErrorConfig(
+            medium_min_groups=check.positive_int(
+                precursors,
+                "warning_before_error.medium_min_groups",
+                defaults.warning_before_error.medium_min_groups,
+            )
+        ),
+        error_spike=ErrorSpikeConfig(
+            window_s=check.positive_int(
+                spikes, "error_spike.window_s", defaults.error_spike.window_s
+            ),
+            # Below 1 the threshold could fall under the normal level of errors.
+            factor=check.number_at_least_one(
+                spikes, "error_spike.factor", defaults.error_spike.factor
+            ),
+            min_errors=check.positive_int(
+                spikes, "error_spike.min_errors", defaults.error_spike.min_errors
+            ),
+        ),
     )
 
 
@@ -184,6 +227,12 @@ class _Checker:
             self.fail(f"{key} must be a positive integer, got {_show(value)}")
         return value
 
+    def number_at_least_one(self, table: Mapping[str, object], key: str, default: float) -> float:
+        value = table.get(key.rpartition(".")[2], default)
+        if not isinstance(value, int | float) or not _number(value) or value < 1:
+            self.fail(f"{key} must be a number greater than or equal to 1, got {_show(value)}")
+        return value
+
     def positive_number(self, table: Mapping[str, object], key: str, default: float) -> float:
         value = table.get(key.rpartition(".")[2], default)
         if (
@@ -194,6 +243,11 @@ class _Checker:
         ):
             self.fail(f"{key} must be a positive number, got {_show(value)}")
         return value
+
+
+def _number(value: object) -> bool:
+    """A finite int or float; bool is a subclass of int and is excluded."""
+    return isinstance(value, int | float) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def _show(value: object) -> str:

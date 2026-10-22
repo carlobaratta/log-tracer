@@ -6,10 +6,12 @@ import pytest
 
 from log_tracer.config import (
     AnalysisConfig,
+    ErrorSpikeConfig,
     HighLatencyConfig,
     LatencyThresholds,
     RecurringErrorConfig,
     ReportConfig,
+    WarningBeforeErrorConfig,
     load_config,
     parse_config,
 )
@@ -37,6 +39,8 @@ def test_defaults_match_the_spec() -> None:
     assert config.recurring_error == RecurringErrorConfig(min_occurrences=3, high_count=20)
     assert (config.high_latency.warn_ms, config.high_latency.critical_ms) == (1000, 5000)
     assert dict(config.high_latency.services) == {}
+    assert config.warning_before_error == WarningBeforeErrorConfig(medium_min_groups=3)
+    assert config.error_spike == ErrorSpikeConfig(window_s=60, factor=3.0, min_errors=5)
 
 
 def test_empty_file_gives_the_defaults(tmp_path: Path) -> None:
@@ -91,7 +95,16 @@ def test_configurations_compare_by_value() -> None:
     ("data", "message"),
     [
         ({"reports": {}}, "cfg.toml: unknown key 'reports' (did you mean 'report'?)"),
-        ({"error_spike": {"window_s": 60}}, "cfg.toml: unknown key 'error_spike'"),
+        (
+            {"error_spikes": {}},
+            "cfg.toml: unknown key 'error_spikes' (did you mean 'error_spike'?)",
+        ),
+        ({"latency": {}}, "cfg.toml: unknown key 'latency' (did you mean 'high_latency'?)"),
+        ({"misc": {}}, "cfg.toml: unknown key 'misc'"),
+        (
+            {"error_spike": {"window": 60}},
+            "cfg.toml: unknown key 'error_spike.window' (did you mean 'window_s'?)",
+        ),
         (
             {"high_latency": {"warn": 10}},
             "cfg.toml: unknown key 'high_latency.warn' (did you mean 'warn_ms'?)",
@@ -212,3 +225,51 @@ def test_errors_name_the_file(tmp_path: Path) -> None:
     with pytest.raises(ConfigError) as excinfo:
         load_config(path)
     assert str(excinfo.value).startswith(f"{path.as_posix()}: report.max_examples")
+
+
+# --- warning_before_error and error_spike ---------------------------------------------------
+
+
+def test_rule_sections_are_read(tmp_path: Path) -> None:
+    config = load_config(
+        write(
+            tmp_path,
+            "[warning_before_error]\nmedium_min_groups = 2\n\n"
+            "[error_spike]\nwindow_s = 300\nfactor = 1\nmin_errors = 8\n",
+        )
+    )
+    assert config.warning_before_error == WarningBeforeErrorConfig(medium_min_groups=2)
+    assert config.error_spike == ErrorSpikeConfig(window_s=300, factor=1, min_errors=8)
+
+
+@pytest.mark.parametrize(
+    ("data", "message"),
+    [
+        (
+            {"warning_before_error": {"medium_min_groups": 0}},
+            "cfg.toml: warning_before_error.medium_min_groups must be a positive integer, got 0",
+        ),
+        (
+            {"error_spike": {"window_s": 2.5}},
+            "cfg.toml: error_spike.window_s must be a positive integer, got 2.5",
+        ),
+        (
+            {"error_spike": {"min_errors": -1}},
+            "cfg.toml: error_spike.min_errors must be a positive integer, got -1",
+        ),
+        (
+            {"error_spike": {"factor": 0.5}},
+            "cfg.toml: error_spike.factor must be a number greater than or equal to 1, got 0.5",
+        ),
+        (
+            {"error_spike": {"factor": True}},
+            "cfg.toml: error_spike.factor must be a number greater than or equal to 1, got true",
+        ),
+        (
+            {"error_spike": {"factor": float("nan")}},
+            "cfg.toml: error_spike.factor must be a number greater than or equal to 1, got NaN",
+        ),
+    ],
+)
+def test_rule_section_values_are_validated(data: dict[str, object], message: str) -> None:
+    assert error_of(data) == message

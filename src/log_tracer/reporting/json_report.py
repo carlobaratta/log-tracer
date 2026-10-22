@@ -214,6 +214,14 @@ def _config(config: AnalysisConfig) -> JsonObject:
                 for name, thresholds in sorted(latency.services.items())
             },
         },
+        "warning_before_error": {
+            "medium_min_groups": config.warning_before_error.medium_min_groups,
+        },
+        "error_spike": {
+            "window_s": config.error_spike.window_s,
+            "factor": config.error_spike.factor,
+            "min_errors": config.error_spike.min_errors,
+        },
     }
 
 

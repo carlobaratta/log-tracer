@@ -274,11 +274,12 @@ Gli stessi gruppi alimentano anche la sezione `top_errors` del report (i primi `
 | Aspetto | Comportamento |
 |---|---|
 | Input | Gruppi di correlazione che contengono almeno un errore con timestamp. |
-| Algoritmo | Sia E il primo errore del gruppo secondo COR-3. I precursori sono gli eventi `WARNING` che precedono E secondo COR-4. Ogni coppia (servizio + impronta del warning, servizio + impronta dell'errore) è aggregata su tutti i gruppi. |
-| Condizione | La coppia compare in almeno un gruppo. |
+| Algoritmo | Sia E il primo errore (`ERROR` o `CRITICAL`) con timestamp del gruppo, secondo COR-3; gli errori successivi non contano. I precursori sono gli eventi di livello esattamente `WARNING` che precedono E secondo COR-4. Ogni coppia (servizio + impronta del warning, servizio + impronta dell'errore) è aggregata su tutti i gruppi, e ogni gruppo conta una sola volta per coppia. Se in un gruppo lo stesso warning compare più volte, vale il più vicino a E. |
+| Condizione | Il warning precede con certezza E in almeno un gruppo. |
 | Severità | `low`; `medium` se la coppia ricorre in almeno `medium_min_groups` gruppi (default 3). |
-| Descrizione | Ad esempio: "In 4 sequenze correlate il warning X precede l'errore Y. È una correlazione temporale, non una relazione causale dimostrata." |
-| Evidenze | `groups`, `median_gap_ms` (mediana dell'intervallo tra il warning e l'errore), `excluded_without_timestamp` |
+| Descrizione | Ad esempio: "In 3 correlated sequences the warning "X" (payments) precedes the error "Y" (payments). This is a temporal correlation, not proven causation." |
+| Evidenze | `warning_service`, `warning_fingerprint`, `error_service`, `error_fingerprint`, `groups`; `median_gap_ms`, cioè la mediana, sui gruppi, dell'intervallo tra il warning più vicino ed E (calcolata in microsecondi interi); `undetermined_groups`, cioè i gruppi in cui il warning compare ma il suo ordine rispetto a E non si può stabilire (senza timestamp, oppure stesso timestamp di E ma in un altro file). Una coppia osservata solo in gruppi indeterminati non produce un finding. |
+| Eventi | Per ogni gruppo, in ordine di E: il warning più vicino ed E, alternati. `event_count` vale 2 × `groups`; `correlation_ids` sono le etichette dei gruppi nello stesso ordine. |
 | Skip | `no_correlated_errors` se non esistono gruppi con errori. |
 
 ### RUL-4 `error_spike` — picchi di errori
@@ -287,10 +288,11 @@ Gli stessi gruppi alimentano anche la sezione `top_errors` del report (i primi `
 |---|---|
 | Finestre | Finestre fisse (*tumbling*) di `window_s` secondi (default 60), allineate all'epoch Unix in UTC. |
 | Intervallo | Va dalla finestra del primo evento con timestamp a quella dell'ultimo, considerando tutti i livelli. |
-| Riferimento | `baseline` è la mediana dei conteggi di errori su **tutte** le finestre dell'intervallo, incluse quelle a zero. |
+| Riferimento | `baseline` è la mediana dei conteggi di errori su **tutte** le finestre dell'intervallo, incluse quelle a zero. Viene calcolata dalle sole finestre con errori (le altre valgono zero e stanno in testa all'ordinamento), così un timestamp anomalo lontano anni non crea milioni di finestre in memoria. |
 | Condizione | Una finestra è un picco se `errors ≥ max(min_errors, factor × baseline)`. I default sono `min_errors` = 5 e `factor` = 3.0. Le finestre di picco consecutive formano un unico finding. |
-| Severità | `high` se la finestra peggiore supera di almeno due volte la soglia; altrimenti `medium`. |
-| Evidenze | `window_s`, `start`, `end`, `errors`, `peak_window_errors`, `baseline`, `threshold` |
+| Severità | `high` se la finestra peggiore ha almeno il doppio della soglia di errori (`peak ≥ 2 × threshold`); altrimenti `medium`. |
+| Evidenze | `window_s`, `start`, `end`, `windows` (finestre unite), `errors`, `peak_window_errors`, `baseline`, `threshold`, `excluded_without_timestamp` |
+| Eventi | Gli errori delle finestre del picco, in ordine di timeline; `correlation_ids` sono le loro sequenze. L'id del finding dipende dall'inizio del picco. |
 | Skip | `insufficient_data` se l'intervallo copre meno di 3 finestre. |
 | Limiti noti | Una finestra fissa può spezzare un picco a cavallo di due finestre. Gli errori senza timestamp sono esclusi e conteggiati nelle evidenze. |
 
@@ -388,7 +390,7 @@ I filtri `--service`, `--since` e `--until` definiscono il **perimetro dell'anal
   - `critical_ms` deve essere maggiore di `warn_ms`, anche per ogni servizio dopo aver ereditato i valori globali;
   - `recurring_error.high_count` deve essere maggiore o uguale a `min_occurrences`.
 
-  Sono accettate solo le sezioni delle regole già implementate: le chiavi di `warning_before_error` ed `error_spike` diventano valide insieme alle rispettive regole.
+  - `error_spike.window_s` è un intero di secondi, e `error_spike.factor` deve essere almeno 1: un fattore minore porterebbe la soglia sotto il livello normale.
 - **CFG-3** La precedenza è: valori di default, poi file di configurazione, poi opzioni della CLI che corrispondono a una chiave (oggi solo `top-errors --limit`, che prevale su `report.top_errors`). Le soglie di un servizio ereditano da `high_latency` quelle che non specificano. I filtri CLI non sono configurazione e sono registrati a parte nel report.
 - **CFG-4** Un file mancante o illeggibile, non UTF-8 o con sintassi TOML non valida (il messaggio riporta riga e colonna) è un errore di configurazione (codice 2). La configurazione viene controllata prima di leggere i log, così un errore non fa sprecare un'analisi lunga.
 
@@ -506,6 +508,7 @@ Gli errori di contenuto (righe e campi) non interrompono mai l'analisi. Gli erro
 | D-10 | Nessun filtro `--level` in `analyze` | Escludere i WARNING annullerebbe RUL-3. | — |
 | D-11 | Il formato predefinito di stdout è `text`; il JSON si ottiene con `--format json` o `--output` | Uno strumento da terminale si legge da una persona; il JSON resta completo e stabile per i programmi. | JSON come predefinito: illeggibile a colpo d'occhio. |
 | D-12 | `--fail-on` e `--output` anticipati all'incremento 3 | Dipendono solo da componenti già presenti e completano i codici di uscita (tranne il 4, legato a `inspect`). | Rimandarli all'incremento 7. |
+| D-13 | RUL-3 misura l'incertezza con `undetermined_groups` invece di `excluded_without_timestamp` | Conta l'incertezza proprio sulla coppia warning→errore del finding, inclusi i timestamp uguali in file diversi (COR-4). | Contare gli eventi senza timestamp, un dato poco legato al finding. |
 
 ## 13. Questioni aperte
 

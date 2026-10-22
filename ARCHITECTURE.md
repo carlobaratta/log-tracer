@@ -126,7 +126,7 @@ Ogni regola è una funzione con firma esplicita:
 def run(ctx: AnalysisContext, config: RecurringErrorConfig) -> RuleOutcome: ...
 ```
 
-`analysis/__init__.py` chiama le quattro regole in un ordine fisso. Non c'è registro dinamico né sistema di plugin: aggiungere una regola significa aggiungere un modulo e una riga. `AnalysisContext` contiene i dati calcolati una sola volta e condivisi da tutte le regole (eventi in ordine di timeline, gruppi di correlazione, gruppi di errori), così nessuna regola li ricalcola.
+`analysis/__init__.py` chiama le quattro regole in un ordine fisso. Non c'è registro dinamico né sistema di plugin: aggiungere una regola significa aggiungere un modulo e una riga. `AnalysisContext` contiene i dati calcolati una sola volta e condivisi da tutte le regole: eventi in ordine di timeline, gruppi di errori, sequenze correlate ed etichetta di sequenza di ogni evento. Così nessuna regola li ricalcola. Le quattro regole girano nell'ordine RUL-1…4 e non dipendono l'una dall'altra.
 
 ---
 

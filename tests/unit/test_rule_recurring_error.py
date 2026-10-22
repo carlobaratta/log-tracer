@@ -139,6 +139,8 @@ def test_analyze_reports_rule_status_and_top_errors() -> None:
     assert [(o.rule, o.status) for o in result.rules] == [
         (RuleName.RECURRING_ERROR, "ok"),
         (RuleName.HIGH_LATENCY, "skipped"),  # no event has a duration
+        (RuleName.WARNING_BEFORE_ERROR, "skipped"),  # no correlated error
+        (RuleName.ERROR_SPIKE, "skipped"),  # a single window
     ]
     assert [(g.service, g.count) for g in result.top_errors] == [("a", 3)]
     assert result.level_counts == {Level.ERROR: 3, Level.INFO: 1}
