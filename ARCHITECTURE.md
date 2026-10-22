@@ -269,9 +269,9 @@ class SkippedFile:  # file trovato in una directory e non analizzato (ING-1)
 
 
 @dataclass(frozen=True, slots=True)
-class IngestionWarning:  # stampato su stderr dalla CLI (ING-7, ING-9)
-    code: WarningCode  # unreadable_file, mostly_unparsed
-    path: str
+class DataWarning:  # stampato su stderr dalla CLI (ING-7, ING-9, COR-6)
+    code: WarningCode  # unreadable_file, mostly_unparsed, large_correlation_group
+    path: str | None  # None per i problemi trovati dall'analisi
     message: str
 
 
@@ -282,7 +282,7 @@ class IngestionSummary:
     unparsed_counts: Mapping[UnparsedReason, int]
     unparsed_samples: tuple[UnparsedLine, ...]  # solo i primi N
     issue_counts: Mapping[IssueCode, int]
-    warnings: tuple[IngestionWarning, ...]
+    warnings: tuple[DataWarning, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -326,6 +326,8 @@ class ErrorGroup:  # alimenta top_errors e RUL-1
     first_seen: datetime | None
     last_seen: datetime | None
     events: tuple[SourceRef, ...]  # campione
+    correlation_groups: int  # sequenze che contengono almeno un suo evento
+    correlation_ids: tuple[str, ...]  # le loro etichette, per prima occorrenza (campione)
 
 
 EvidenceValue = str | int | float | bool | None
@@ -361,7 +363,7 @@ class AnalysisResult:
     top_errors: tuple[ErrorGroup, ...]
     rules: tuple[RuleOutcome, ...]
     findings: tuple[Finding, ...]  # ordinati (RUL-0.4)
-    warnings: tuple[str, ...]  # ad esempio COR-6
+    warnings: tuple[DataWarning, ...]  # ad esempio COR-6
 
 
 @dataclass(frozen=True, slots=True)
@@ -375,6 +377,8 @@ class Report:
 ```
 
 Il `Report` non contiene gli eventi (REP-2): `IngestionResult` è composto da `events` e da un `IngestionSummary` (sorgenti, conteggi, campioni), e nel report finisce solo quest'ultimo. `schema_version` non è un campo del modello: appartiene alla codifica JSON e la scrive `reporting.json_report`.
+
+**Correlazione (`analysis.correlation`).** `correlate()` costruisce un *union-find* sui nodi `("request", id)` e `("trace", id)`: due nodi sono uniti quando compaiono nello stesso evento, e ogni componente connessa è una sequenza (COR-1). Lo spazio di nomi nel nodo tiene separati un request_id e un trace_id con lo stesso valore. Il costo è quasi lineare grazie all'unione per dimensione e alla compressione dei cammini. La partizione non dipende dall'ordine degli eventi: un test di proprietà la confronta con una visita in ampiezza scritta in modo indipendente nel test. `inspect` usa lo stesso risultato tramite `pipeline.run_inspect()`, che produce un `Inspection` (identificativo cercato, sequenze trovate, riepilogo degli input) senza eseguire le regole.
 
 **Identificativo di un finding.** È l'hash SHA-256 di una chiave canonica, specifica di ogni regola (ad esempio `servizio + "\x1f" + impronta` per RUL-1). È stabile tra esecuzioni e permette di confrontare due report. Non si usa `hash()`, che in Python cambia da un'esecuzione all'altra.
 
@@ -390,6 +394,7 @@ Il `Report` non contiene gli eventi (REP-2): `IngestionResult` è composto da `e
 | File di `--output` non scrivibile | `OutputError` | `cli` → codice 3, prima di stampare su stdout |
 | Configurazione | `ConfigError`, con il nome della chiave | `cli` → codice 2 |
 | Stato salvato mancante o incompatibile | `StateError` | `cli` → codice 3 |
+| Identificativo non presente nei log (`inspect`) | `NotFoundError` | `cli` → codice 4 |
 | Bug | Qualunque altra eccezione | Unica guardia in `cli.main()`: messaggio e traceback su stderr, codice 70 |
 
 Il codice non contiene mai `except Exception` fuori dalla guardia finale della CLI. La traduzione da eccezione a codice di uscita avviene in un solo punto (`cli.py`), quindi la tabella della SPEC §5.4 corrisponde a un unico `match`.

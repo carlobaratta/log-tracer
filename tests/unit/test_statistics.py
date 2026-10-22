@@ -126,3 +126,30 @@ def test_grouping_does_not_depend_on_input_order() -> None:
         shuffled = list(events)
         random.Random(seed).shuffle(shuffled)
         assert group_errors(shuffled, max_examples=3) == expected
+
+
+# --- Sequences of each error group (RUL-1, COR-1) -------------------------------------------
+
+
+def test_error_groups_count_their_sequences_in_order_of_first_occurrence() -> None:
+    events = [
+        make_event(level=Level.ERROR, message="boom", line=1, timestamp=at(3), request_id="r3"),
+        make_event(level=Level.ERROR, message="boom", line=2, timestamp=at(1), request_id="r1"),
+        make_event(level=Level.ERROR, message="boom", line=3, timestamp=at(2), request_id="r3"),
+        make_event(level=Level.ERROR, message="boom", line=4, timestamp=at(4)),
+        make_event(level=Level.ERROR, message="boom", line=5, timestamp=at(5), request_id="r2"),
+    ]
+    label_of = {
+        SourceRef("app.log", 1): "r3",
+        SourceRef("app.log", 2): "r1",
+        SourceRef("app.log", 3): "r3",
+        SourceRef("app.log", 5): "r2",
+    }
+    (group,) = group_errors(events, max_examples=2, label_of=label_of)
+    assert group.correlation_groups == 3
+    assert group.correlation_ids == ("r1", "r3")  # timeline order, capped at max_examples
+
+
+def test_error_groups_without_identifiers_have_no_sequences() -> None:
+    (group,) = group_errors([make_event(level=Level.ERROR)], max_examples=10)
+    assert (group.correlation_groups, group.correlation_ids) == (0, ())

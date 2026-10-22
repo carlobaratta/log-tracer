@@ -39,9 +39,10 @@ def _finding(group: ErrorGroup, config: RecurringErrorConfig) -> Finding:
                 "has_critical": group.has_critical,
                 "first_seen": group.first_seen,
                 "last_seen": group.last_seen,
+                "correlation_groups": group.correlation_groups,
             }
         ),
         event_count=group.count,
         events=group.events,
-        correlation_ids=(),
+        correlation_ids=group.correlation_ids,
     )

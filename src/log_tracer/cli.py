@@ -22,11 +22,17 @@ from rich.text import Text
 
 from log_tracer import __version__
 from log_tracer.config import AnalysisConfig
-from log_tracer.errors import InputError, LogTracerError, OutputError
-from log_tracer.models import IngestionWarning, InputFormat, Report, Severity, WarningCode
-from log_tracer.pipeline import run_analysis
+from log_tracer.errors import InputError, LogTracerError, NotFoundError, OutputError
+from log_tracer.ingestion.fields import normalize_identifier
+from log_tracer.models import DataWarning, InputFormat, Report, Severity, WarningCode
+from log_tracer.pipeline import run_analysis, run_inspect
 from log_tracer.reporting import json_report
-from log_tracer.reporting.terminal import render_report, render_top_errors, safe_text
+from log_tracer.reporting.terminal import (
+    render_report,
+    render_timeline,
+    render_top_errors,
+    safe_text,
+)
 
 
 class ExitCode(enum.IntEnum):
@@ -34,6 +40,7 @@ class ExitCode(enum.IntEnum):
     FINDINGS = 1  # --fail-on threshold reached
     USAGE = 2  # also used by Typer for invalid arguments and options
     INPUT = 3  # input, output or saved-state problems
+    NOT_FOUND = 4  # inspect: identifier not found
     INTERNAL = 70
 
 
@@ -159,6 +166,49 @@ def top_errors(
         _stdout().print(render_top_errors(report))
 
 
+@app.command("inspect")
+def inspect_command(
+    identifier: Annotated[
+        str,
+        typer.Argument(
+            metavar="ID",
+            help="A request_id or trace_id, matched exactly (upper and lower case differ).",
+            show_default=False,
+        ),
+    ],
+    paths: Paths,
+    output_format: FormatOption = OutputFormat.TEXT,
+    input_format: InputFormatOption = InputFormatChoice.AUTO,
+) -> None:
+    """Show the timeline of the sequence that contains a request_id or trace_id."""
+    query = normalize_identifier(identifier)
+    if query is None:
+        # Raised outside _exit_on_error: it is a usage error (exit 2), not a bug.
+        raise typer.BadParameter(
+            f"{identifier.strip()!r} means 'no identifier' in logs and cannot be searched for",
+            param_hint="ID",
+        )
+    with _exit_on_error():
+        inspection = run_inspect(
+            paths,
+            query,
+            config=AnalysisConfig(),
+            now=datetime.now(UTC),
+            input_format=_input_format(input_format),
+        )
+    _print_warnings(inspection.ingestion.warnings)
+    with _exit_on_error():
+        if not inspection.groups:
+            raise NotFoundError(
+                f"no event has request_id or trace_id '{query}'",
+                hint="identifiers are matched exactly, including upper and lower case",
+            )
+    if output_format is OutputFormat.JSON:
+        typer.echo(json_report.dumps_inspection(inspection), nl=False)
+    else:
+        _stdout().print(render_timeline(inspection))
+
+
 # --- Helpers ---------------------------------------------------------------------------
 
 
@@ -168,12 +218,14 @@ def _run(paths: list[Path], config: AnalysisConfig, input_format: InputFormatCho
             paths,
             config=config,
             now=datetime.now(UTC),
-            input_format=None
-            if input_format is InputFormatChoice.AUTO
-            else InputFormat(input_format),
+            input_format=_input_format(input_format),
         )
     _print_warnings(report.ingestion.warnings)
     return report
+
+
+def _input_format(choice: InputFormatChoice) -> InputFormat | None:
+    return None if choice is InputFormatChoice.AUTO else InputFormat(choice)
 
 
 def _write(path: Path, text: str) -> None:
@@ -205,13 +257,16 @@ def _exit_on_error() -> Iterator[None]:
     except (InputError, OutputError) as error:
         _print_error(error)
         raise typer.Exit(ExitCode.INPUT) from error
+    except NotFoundError as error:
+        _print_error(error)
+        raise typer.Exit(ExitCode.NOT_FOUND) from error
     except Exception as error:  # last-resort guard: anything else is a bug
         _stderr().print(Text("Internal error: this is a bug in log-tracer. Details follow."))
         traceback.print_exception(error, file=sys.stderr)
         raise typer.Exit(ExitCode.INTERNAL) from error
 
 
-def _print_warnings(warnings: Iterable[IngestionWarning]) -> None:
+def _print_warnings(warnings: Iterable[DataWarning]) -> None:
     """Warnings go to stderr, so that stdout stays a single document (CLI-1, CLI-2)."""
     for warning in warnings:
         _say("Warning", "yellow", warning.message)

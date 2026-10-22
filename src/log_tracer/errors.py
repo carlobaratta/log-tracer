@@ -21,3 +21,7 @@ class InputError(LogTracerError):
 
 class OutputError(LogTracerError):
     """An output file (``--output``) cannot be written."""
+
+
+class NotFoundError(LogTracerError):
+    """The identifier given to ``inspect`` does not appear in the logs."""

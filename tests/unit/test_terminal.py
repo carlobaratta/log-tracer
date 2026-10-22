@@ -17,6 +17,8 @@ from hypothesis import strategies as st
 from rich.console import Console, RenderableType
 
 from log_tracer.models import (
+    CorrelationGroup,
+    Event,
     IssueCode,
     Level,
     RuleName,
@@ -27,8 +29,21 @@ from log_tracer.models import (
     TimeRange,
     UnparsedReason,
 )
-from log_tracer.reporting.terminal import render_report, render_top_errors, safe_text
-from tests.factories import FINDING, SOURCE, TOP_ERROR, at, make_report
+from log_tracer.reporting.terminal import (
+    render_report,
+    render_timeline,
+    render_top_errors,
+    safe_text,
+)
+from tests.factories import (
+    FINDING,
+    SOURCE,
+    TOP_ERROR,
+    at,
+    make_event,
+    make_inspection,
+    make_report,
+)
 
 BIDI_AND_SEPARATORS = set(
     "\u061c\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\u2028\u2029"
@@ -291,3 +306,149 @@ def test_data_quality_shows_only_what_is_present(
     output = lines(render_report(make_report(unparsed_counts=unparsed, issue_counts=issues)))
     assert expected in output
     assert not any(line.startswith(absent) for line in output)
+
+
+# --- Correlation in the summary (REP-1, RUL-1) -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("groups", "uncorrelated", "expected"),
+    [
+        (5, 9, "Correlation: 5 sequences · 9 uncorrelated events"),
+        (1, 1, "Correlation: 1 sequence · 1 uncorrelated event"),
+        (0, 7, "Correlation: 0 sequences · 7 uncorrelated events"),
+    ],
+)
+def test_summary_counts_sequences(groups: int, uncorrelated: int, expected: str) -> None:
+    report = make_report(correlation_groups=groups, uncorrelated_events=uncorrelated)
+    assert expected in lines(render_report(report))
+
+
+@pytest.mark.parametrize(("count", "text"), [(3, "3 sequences"), (1, "1 sequence")])
+def test_error_groups_mention_their_sequences(count: int, text: str) -> None:
+    group = dataclasses.replace(TOP_ERROR, correlation_groups=count, correlation_ids=("t-1",))
+    report = make_report(top_errors=(group,), time_range=TimeRange(at(0), at(90)))
+    expected = f"first 14:00:01.000Z · last 14:00:09.000Z · {text} · example logs/app.log:4"
+    assert expected in lines(render_report(report))
+    assert expected in lines(render_top_errors(report))
+
+
+# --- Timeline (inspect) --------------------------------------------------------------------
+
+
+def timeline_lines(*events: Event, label: str = "t-1", query: str = "req-184") -> list[str]:
+    requests = tuple(sorted({e.request_id for e in events if e.request_id}))
+    traces = tuple(sorted({e.trace_id for e in events if e.trace_id}))
+    group = CorrelationGroup(label, requests, traces, events)
+    return lines(render_timeline(make_inspection(query=query, groups=(group,))))
+
+
+def test_timeline_header_and_events() -> None:
+    assert lines(render_timeline(make_inspection())) == [
+        "Sequence t-1 · 2 events · 2 services · 2.500 s",
+        "request_id req-184 · trace_id t-1",
+        "Order follows each service's own timestamps; clocks on different hosts may differ.",
+        "1. 14:00:00.000Z      +0 ms  INFO     api-gateway: POST /checkout",
+        "app.log:2",
+        "2. 14:00:02.500Z   +2.500 s  ERROR    payments: timeout",
+        "app.log:5 · duration 2500 ms · attempt=2",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("seconds", "offset"),
+    [
+        (0.015, "+15 ms"),
+        (0.9994, "+999 ms"),
+        (0.9996, "+1.000 s"),
+        (2.782, "+2.782 s"),
+        (75, "+75.000 s"),
+    ],
+)
+def test_offsets_are_in_milliseconds_below_one_second(seconds: float, offset: str) -> None:
+    output = timeline_lines(
+        make_event(line=1, timestamp=at(0), request_id="r"),
+        make_event(line=2, timestamp=at(seconds), request_id="r"),
+    )
+    assert any(line.startswith("2. ") and f" {offset}  " in line for line in output)
+
+
+def test_untimed_events_come_last_without_offset() -> None:
+    output = timeline_lines(
+        make_event(line=1, timestamp=at(0), request_id="r"),
+        make_event(line=2, timestamp=None, request_id="r", level=Level.WARNING, message="late"),
+    )
+    assert "2. no time" + " " * 19 + "WARNING  api: late" in output
+
+
+def test_sequences_spanning_days_show_full_timestamps() -> None:
+    output = timeline_lines(
+        make_event(line=1, timestamp=at(0), request_id="r"),
+        make_event(line=2, timestamp=at(86_400), request_id="r"),
+    )
+    assert output[0] == "Sequence t-1 · 2 events · 1 service · 86400.000 s"
+    assert any(line.startswith("2. 2026-10-17T14:00:00.000Z") for line in output)
+
+
+def test_single_event_has_no_span() -> None:
+    output = timeline_lines(make_event(line=1, timestamp=at(0), request_id="r"))
+    assert output[0] == "Sequence t-1 · 1 event · 1 service"
+
+
+def test_undetermined_order_is_marked_with_a_legend() -> None:  # COR-4
+    output = timeline_lines(
+        make_event(line=7, path="a.log", timestamp=at(1), request_id="r"),
+        make_event(line=3, path="b.log", timestamp=at(1), request_id="r"),
+    )
+    assert any(line.startswith("2. ") and "+0 ms~" in line for line in output)
+    assert output[-1] == (
+        "~ same timestamp as the previous event, from another file: their order is undetermined"
+    )
+
+
+def test_same_timestamp_in_the_same_file_has_a_known_order() -> None:
+    output = timeline_lines(
+        make_event(line=1, timestamp=at(1), request_id="r"),
+        make_event(line=2, timestamp=at(1), request_id="r"),
+    )
+    assert not any("~" in line for line in output)
+
+
+def test_unknown_level_shows_the_original_value() -> None:
+    output = timeline_lines(
+        make_event(line=1, timestamp=at(0), request_id="r", level=Level.UNKNOWN, raw_level="NOTICE")
+    )
+    assert any("NOTICE   api:" in line for line in output)
+
+
+def test_identifier_lists_are_capped() -> None:
+    events = [
+        make_event(line=i, timestamp=at(i), request_id=f"r{i}", trace_id="t") for i in range(7)
+    ]
+    output = timeline_lines(*events, label="t", query="t")
+    assert output[1] == "request_ids r0, r1, r2, r3, r4 and 2 more · trace_id t"
+
+
+def test_several_matching_sequences_are_announced() -> None:
+    first = CorrelationGroup("abc", (), ("abc",), (make_event(line=1, trace_id="abc"),))
+    second = CorrelationGroup("abc", ("abc",), (), (make_event(line=2, request_id="abc"),))
+    output = lines(render_timeline(make_inspection(query="abc", groups=(first, second))))
+    assert output[0] == "abc matches 2 sequences"
+    assert sum(line.startswith("Sequence abc") for line in output) == 2
+
+
+def test_timeline_content_is_escaped() -> None:  # CLI-4
+    output = "\n".join(
+        timeline_lines(
+            make_event(
+                line=1,
+                timestamp=at(0),
+                request_id="r",
+                service="[red]svc",
+                message="boom\x1b[2J",
+                attributes={"k": "v\u202e"},
+            )
+        )
+    )
+    assert "[red]svc: boom\\x1b[2J" in output
+    assert "k=v\\u202e" in output

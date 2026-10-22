@@ -136,6 +136,17 @@ def test_examples_directory_combines_text_and_json_lines() -> None:
     ]
     assert report["skipped_files"] == []
     assert report["summary"]["events"] == 34
+    assert (report["summary"]["correlation_groups"], report["summary"]["uncorrelated_events"]) == (
+        5,
+        9,
+    )
+    by_service = {g["service"]: g for g in report["top_errors"]}
+    assert by_service["api-gateway"]["correlation_ids"] == [
+        "4bf92f3577b34da6",
+        "c3d4e5f6a7b8c9d0",
+        "e5f6a7b8c9d0e1f2",
+    ]
+    assert by_service["inventory"]["correlation_groups"] == 0
     assert report["summary"]["levels"] == {
         "CRITICAL": 0,
         "ERROR": 11,
@@ -343,8 +354,12 @@ def test_text_summary_of_the_examples() -> None:
         "3",
     ] in cells(out)
     assert "1. 3x api-gateway: POST /checkout failed" in lines
-    assert "first 14:03:24.910Z · last 14:05:23.897Z · example examples/logs/sample.log:6" in lines
+    assert (
+        "first 14:03:24.910Z · last 14:05:23.897Z · 3 sequences · "
+        "example examples/logs/sample.log:6"
+    ) in lines
     assert "Levels: ERROR 11 · WARNING 6 · INFO 14 · DEBUG 2 · UNKNOWN 1" in lines
+    assert "Correlation: 5 sequences · 9 uncorrelated events" in lines
     assert "examples/logs/sample.jsonl (jsonl): 9 events, 2 unparsed" in lines
     assert "Unparsed lines: no_match 1 · invalid_json 1 · not_an_object 1" in lines
 

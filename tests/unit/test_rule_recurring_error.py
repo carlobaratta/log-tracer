@@ -1,11 +1,23 @@
 """RUL-1 recurring_error."""
 
+import pytest
+
 from log_tracer.analysis import analyze
 from log_tracer.analysis.context import AnalysisContext
+from log_tracer.analysis.correlation import LARGE_GROUP
 from log_tracer.analysis.rules import recurring_error
 from log_tracer.analysis.statistics import group_errors
 from log_tracer.config import AnalysisConfig, RecurringErrorConfig
-from log_tracer.models import Event, Finding, Level, RuleName, Severity, SourceRef
+from log_tracer.models import (
+    DataWarning,
+    Event,
+    Finding,
+    Level,
+    RuleName,
+    Severity,
+    SourceRef,
+    WarningCode,
+)
 from tests.factories import at, make_event
 
 CONFIG = RecurringErrorConfig(min_occurrences=3, high_count=5)
@@ -68,6 +80,7 @@ def test_finding_carries_evidence_and_a_capped_event_sample() -> None:
         "has_critical": False,
         "first_seen": at(0),
         "last_seen": at(3),
+        "correlation_groups": 0,
     }
     assert finding.events == (SourceRef("app.log", 1), SourceRef("app.log", 2))
     assert finding.correlation_ids == ()
@@ -126,3 +139,42 @@ def test_analyze_reports_rule_status_and_top_errors() -> None:
     assert [(o.rule, o.status) for o in result.rules] == [(RuleName.RECURRING_ERROR, "ok")]
     assert [(g.service, g.count) for g in result.top_errors] == [("a", 3)]
     assert result.level_counts == {Level.ERROR: 3, Level.INFO: 1}
+
+
+def test_finding_reports_the_sequences_it_appears_in() -> None:
+    events = [
+        make_event(level=Level.ERROR, message="timeout", line=i, timestamp=at(i), request_id=rid)
+        for i, rid in enumerate(["r2", "r1", "r2", None], start=1)
+    ]
+    (finding,) = analyze(events, AnalysisConfig()).findings
+    assert finding.evidence["correlation_groups"] == 2
+    assert finding.correlation_ids == ("r2", "r1")
+
+
+def test_analyze_counts_sequences_and_uncorrelated_events() -> None:
+    events = [
+        make_event(line=1, request_id="r1"),
+        make_event(line=2, request_id="r1", trace_id="t1"),
+        make_event(line=3, trace_id="t2"),
+        make_event(line=4),
+    ]
+    result = analyze(events, AnalysisConfig())
+    assert (result.correlation_groups, result.uncorrelated_events) == (2, 1)
+    assert result.warnings == ()
+
+
+@pytest.mark.parametrize(("size", "warned"), [(LARGE_GROUP, False), (LARGE_GROUP + 1, True)])
+def test_very_large_sequences_produce_a_warning(size: int, warned: bool) -> None:  # COR-6
+    events = [make_event(line=i, request_id="shared") for i in range(1, size + 1)]
+    warnings = analyze(events, AnalysisConfig()).warnings
+    if warned:
+        assert warnings == (
+            DataWarning(
+                WarningCode.LARGE_CORRELATION_GROUP,
+                None,
+                f"sequence shared contains {size} events: "
+                "an identifier may be reused by unrelated requests",
+            ),
+        )
+    else:
+        assert warnings == ()

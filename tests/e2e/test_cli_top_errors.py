@@ -43,11 +43,13 @@ def test_list_of_the_examples() -> None:
     assert [line.strip() for line in result.stdout.splitlines() if line.strip()] == [
         "Top errors in 2 files (34 events)",
         "1. 3x api-gateway: POST /checkout failed",
-        "first 14:03:24.910Z · last 14:05:23.897Z · example examples/logs/sample.log:6",
+        "first 14:03:24.910Z · last 14:05:23.897Z · 3 sequences · "
+        "example examples/logs/sample.log:6",
         "2. 3x inventory: Stock sync with warehouse failed: HTTP <num>",
         "first 14:04:20.000Z · last 14:04:50.000Z · example examples/logs/sample.jsonl:5",
         "3. 3x payments: Payment gateway timeout after <num> ms",
-        "first 14:03:24.902Z · last 14:05:23.891Z · example examples/logs/sample.log:5",
+        "first 14:03:24.902Z · last 14:05:23.891Z · 3 sequences · "
+        "example examples/logs/sample.log:5",
         "4. 2x scheduler: Job cleanup-sessions failed: connection refused <ip>",
         "first 14:04:02.003Z · last 14:06:02.011Z · example examples/logs/sample.log:14",
     ]

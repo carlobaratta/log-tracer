@@ -1,11 +1,14 @@
 """Descriptive statistics: level distribution, time range and error groups."""
 
 from collections import Counter
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
+from types import MappingProxyType
 
 from log_tracer.analysis.correlation import timeline_key
 from log_tracer.analysis.fingerprint import fingerprint
-from log_tracer.models import ErrorGroup, Event, Level, TimeRange
+from log_tracer.models import ErrorGroup, Event, Level, SourceRef, TimeRange
+
+_NO_LABELS: Mapping[SourceRef, str] = MappingProxyType({})
 
 
 def count_levels(events: Iterable[Event]) -> dict[Level, int]:
@@ -19,12 +22,18 @@ def time_range(events: Iterable[Event]) -> TimeRange | None:
     return TimeRange(start=min(timestamps), end=max(timestamps))
 
 
-def group_errors(events: Sequence[Event], *, max_examples: int) -> tuple[ErrorGroup, ...]:
+def group_errors(
+    events: Sequence[Event],
+    *,
+    max_examples: int,
+    label_of: Mapping[SourceRef, str] = _NO_LABELS,
+) -> tuple[ErrorGroup, ...]:
     """Group ERROR and CRITICAL events by (service, fingerprint).
 
     Groups are sorted by count (descending), then service (missing last), then
     fingerprint. Each group keeps at most ``max_examples`` event references,
-    in timeline order.
+    in timeline order. ``label_of`` gives the sequence of correlated events
+    (see :func:`log_tracer.analysis.correlation.correlate`).
     """
     buckets: dict[tuple[str | None, str], list[Event]] = {}
     for event in sorted(events, key=timeline_key):
@@ -33,7 +42,7 @@ def group_errors(events: Sequence[Event], *, max_examples: int) -> tuple[ErrorGr
             buckets.setdefault(key, []).append(event)
 
     groups = [
-        _make_group(service, pattern, members, max_examples)
+        _make_group(service, pattern, members, max_examples, label_of)
         for (service, pattern), members in buckets.items()
     ]
     groups.sort(key=lambda g: (-g.count, g.service is None, g.service or "", g.fingerprint))
@@ -41,9 +50,15 @@ def group_errors(events: Sequence[Event], *, max_examples: int) -> tuple[ErrorGr
 
 
 def _make_group(
-    service: str | None, pattern: str, members: list[Event], max_examples: int
+    service: str | None,
+    pattern: str,
+    members: list[Event],
+    max_examples: int,
+    label_of: Mapping[SourceRef, str],
 ) -> ErrorGroup:
     timestamps = [event.timestamp for event in members if event.timestamp is not None]
+    # Members are in timeline order: dict keys keep the first occurrence of each label.
+    labels = list(dict.fromkeys(label_of[e.ref] for e in members if e.ref in label_of))
     return ErrorGroup(
         service=service,
         fingerprint=pattern,
@@ -52,4 +67,6 @@ def _make_group(
         first_seen=min(timestamps, default=None),
         last_seen=max(timestamps, default=None),
         events=tuple(event.ref for event in members[:max_examples]),
+        correlation_groups=len(labels),
+        correlation_ids=tuple(labels[:max_examples]),
     )

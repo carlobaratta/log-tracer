@@ -140,14 +140,16 @@ class SkippedFile:
 class WarningCode(enum.StrEnum):
     UNREADABLE_FILE = "unreadable_file"
     MOSTLY_UNPARSED = "mostly_unparsed"
+    LARGE_CORRELATION_GROUP = "large_correlation_group"
 
 
 @dataclass(frozen=True, slots=True)
-class IngestionWarning:
-    """A problem worth telling the user about on stderr (ING-7, ING-9)."""
+class DataWarning:
+    """A data problem worth telling the user about on stderr (ING-7, ING-9, COR-6)."""
 
     code: WarningCode
-    path: str
+    path: str | None
+    """The file concerned, or None for problems found by the analysis (COR-6)."""
     message: str
 
 
@@ -158,7 +160,7 @@ class IngestionSummary:
     unparsed_counts: Mapping[UnparsedReason, int]
     unparsed_samples: tuple[UnparsedLine, ...]
     issue_counts: Mapping[IssueCode, int]
-    warnings: tuple[IngestionWarning, ...]
+    warnings: tuple[DataWarning, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -189,6 +191,18 @@ class TimeRange:
 
 
 @dataclass(frozen=True, slots=True)
+class CorrelationGroup:
+    """Events linked by request_id and/or trace_id, directly or transitively (COR-1)."""
+
+    label: str
+    """The smallest trace_id, or the smallest request_id when there is none (COR-5)."""
+    request_ids: tuple[str, ...]
+    trace_ids: tuple[str, ...]
+    events: tuple[Event, ...]
+    """In timeline order (COR-3)."""
+
+
+@dataclass(frozen=True, slots=True)
 class ErrorGroup:
     """Error events that share a service and a message fingerprint."""
 
@@ -200,6 +214,10 @@ class ErrorGroup:
     last_seen: datetime | None
     events: tuple[SourceRef, ...]
     """A sample in timeline order, capped at ``report.max_examples``."""
+    correlation_groups: int
+    """Number of distinct correlated sequences that contain at least one of its events."""
+    correlation_ids: tuple[str, ...]
+    """Labels of those sequences, by first occurrence, capped at ``report.max_examples``."""
 
 
 EvidenceValue = str | int | float | bool | datetime | None
@@ -235,6 +253,10 @@ class AnalysisResult:
     rules: tuple[RuleOutcome, ...]
     findings: tuple[Finding, ...]
     """Sorted by severity (descending), then rule, then id (RUL-0.4)."""
+    correlation_groups: int
+    uncorrelated_events: int
+    warnings: tuple[DataWarning, ...]
+    """Problems found by the analysis itself, such as COR-6."""
 
 
 # --- Report ----------------------------------------------------------------
@@ -249,3 +271,15 @@ class Report:
     config: AnalysisConfig
     ingestion: IngestionSummary
     analysis: AnalysisResult
+
+
+@dataclass(frozen=True, slots=True)
+class Inspection:
+    """The result of ``inspect``: the sequences that contain an identifier."""
+
+    tool_version: str
+    generated_at: datetime
+    query: str
+    groups: tuple[CorrelationGroup, ...]
+    """Usually one; two when the value is a request_id in one sequence and a trace_id in another."""
+    ingestion: IngestionSummary

@@ -10,7 +10,7 @@ import pytest
 from log_tracer.errors import InputError
 from log_tracer.ingestion import ingest
 from log_tracer.models import (
-    IngestionWarning,
+    DataWarning,
     InputFormat,
     IssueCode,
     Level,
@@ -150,7 +150,7 @@ def test_unreadable_file_is_recorded_and_others_are_analyzed(workdir: Path) -> N
     assert by_path["ok.log"].error is None
     assert [e.message for e in result.events] == ["fine"]
     assert result.summary.warnings == (
-        IngestionWarning(
+        DataWarning(
             WarningCode.UNREADABLE_FILE,
             "locked.log",
             "locked.log could not be read (Permission denied) and was skipped",
@@ -241,7 +241,7 @@ def test_warning_when_at_least_half_of_the_lines_are_unparsed(
 def test_mostly_unparsed_warning_names_the_file_share_and_format(workdir: Path) -> None:
     write(workdir / "app.log", text_file(events=1, unparsed=2))
     (warning,) = ingest([Path("app.log")], max_samples=10).summary.warnings
-    assert warning == IngestionWarning(
+    assert warning == DataWarning(
         WarningCode.MOSTLY_UNPARSED,
         "app.log",
         "66% of the non-blank lines in app.log could not be parsed as text",

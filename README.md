@@ -2,7 +2,7 @@
 
 Log Tracer is a local, offline command-line tool for analyzing log files. It reads them, normalizes every line into a common event model, and reports recurring problems with deterministic, documented rules. The same input and configuration always produce the same report. It needs no network access, credentials, or external services.
 
-> **Status: early development (increment 3 of 10).** Today Log Tracer reads text and JSON Lines logs, from single files or whole directories, and reports recurring errors in the terminal or as JSON. Request timelines (`inspect`), configuration files and the remaining rules come in later increments. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
+> **Status: early development (increment 4 of 10).** Today Log Tracer reads text and JSON Lines logs, from single files or whole directories, correlates events by `request_id` and `trace_id`, shows the timeline of a request, and reports recurring errors in the terminal or as JSON. Configuration files and the remaining rules come in later increments. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
 
 ## Requirements
 
@@ -34,6 +34,7 @@ log-tracer analyze app.log worker.jsonl                   # explicit files
 log-tracer analyze service.log --input-format jsonl       # JSON Lines in a .log file
 log-tracer analyze logs/ --fail-on high                   # exit code 1 if a finding is high
 log-tracer top-errors examples/logs/ --limit 5            # the most frequent errors only
+log-tracer inspect req-184 examples/logs/                 # timeline of one request or trace
 ```
 
 ```
@@ -62,6 +63,27 @@ Output on stdout is either the summary or a single JSON document, so you can pip
 
 Unparsable lines are counted and reported, never silently dropped.
 
+### Request timelines
+
+Events that share a `request_id` or a `trace_id` (directly, or through other events) form a *sequence*, even across files and formats. `inspect` shows one in time order:
+
+```
+$ log-tracer inspect req-184 examples/logs/
+Sequence 4bf92f3577b34da6 · 6 events · 4 services · 2.790 s
+  request_id req-184 · trace_id 4bf92f3577b34da6
+  Order follows each service's own timestamps; clocks on different hosts may differ.
+
+1. 14:03:22.120Z      +0 ms  INFO     api-gateway: POST /checkout
+   examples/logs/sample.log:2
+...
+5. 14:03:24.902Z   +2.782 s  ERROR    payments: Payment gateway timeout after 2500 ms
+   examples/logs/sample.log:5 · duration 2500 ms
+6. 14:03:24.910Z   +2.790 s  ERROR    api-gateway: POST /checkout failed
+   examples/logs/sample.log:6 · duration 2790 ms · status=502
+```
+
+Identifiers are matched exactly, including upper and lower case. Events are only ever linked through identifiers, never because they are close in time. The order across services follows the timestamps each service wrote, so it is a diagnostic hint, not proof of causality.
+
 ### Exit codes
 
 | Code | Meaning |
@@ -70,6 +92,7 @@ Unparsable lines are counted and reported, never silently dropped.
 | 1 | `--fail-on` was given and a finding reached that severity |
 | 2 | Invalid command-line usage |
 | 3 | Input or output error: missing path, unsupported file type, directory without supported files, no readable file, `--output` file not writable |
+| 4 | `inspect`: no event has that `request_id` or `trace_id` |
 | 70 | Internal error, which is a bug. A traceback is printed on stderr |
 
 ### Input formats

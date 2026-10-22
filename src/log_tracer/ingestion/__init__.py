@@ -18,10 +18,10 @@ from log_tracer.ingestion.jsonl_format import parse_jsonl_line
 from log_tracer.ingestion.reader import DigestingReader
 from log_tracer.ingestion.text_format import parse_text_line
 from log_tracer.models import (
+    DataWarning,
     Event,
     IngestionResult,
     IngestionSummary,
-    IngestionWarning,
     InputFormat,
     IssueCode,
     LineOutcome,
@@ -149,9 +149,9 @@ def _failed_source(source: Source, error: str) -> _SourceResult:
     return _SourceResult(summary, (), Counter(), (), Counter())
 
 
-def _warning_for(source: SourceSummary) -> IngestionWarning | None:
+def _warning_for(source: SourceSummary) -> DataWarning | None:
     if source.error is not None:
-        return IngestionWarning(
+        return DataWarning(
             WarningCode.UNREADABLE_FILE,
             source.path,
             f"{source.path} could not be read ({source.error}) and was skipped",
@@ -160,7 +160,7 @@ def _warning_for(source: SourceSummary) -> IngestionWarning | None:
     if non_blank and 2 * source.unparsed >= non_blank:
         # ING-9: at least half of the lines failed, so the format is probably wrong.
         share = 100 * source.unparsed // non_blank
-        return IngestionWarning(
+        return DataWarning(
             WarningCode.MOSTLY_UNPARSED,
             source.path,
             f"{share}% of the non-blank lines in {source.path} "

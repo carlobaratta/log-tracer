@@ -60,6 +60,7 @@ select = [
     "SIM",     # simplifications
     "UP",      # pyupgrade
     "RUF",     # ruff-specific
+    "PLE2502", # bidirectional control characters in source ("Trojan Source")
 ]
 
 [tool.mypy]

@@ -210,11 +210,20 @@ L'impronta è idempotente: applicarla due volte dà lo stesso risultato. Le stri
   - `A.ts == B.ts`, A e B provengono dalla stessa sorgente e la riga di A viene prima.
 
   Se due sorgenti diverse riportano lo stesso timestamp, l'ordine è *indeterminato* e non conta come precedenza.
-- **COR-5** L'etichetta di un gruppo è il `trace_id` lessicograficamente minore. Se il gruppo non ha trace_id, è il `request_id` minore. Il report elenca comunque tutti gli identificativi del gruppo.
-- **COR-6** Un gruppo con più di 10 000 eventi genera un avviso di qualità dei dati, perché potrebbe indicare un identificativo riutilizzato.
+- **COR-5** L'etichetta di un gruppo è il `trace_id` lessicograficamente minore. Se il gruppo non ha trace_id, è il `request_id` minore. Il report elenca comunque tutti gli identificativi del gruppo. I gruppi sono ordinati per etichetta. Se due gruppi hanno la stessa etichetta (un valore usato come trace_id in uno e come request_id nell'altro), viene prima quello con trace_id.
+- **COR-6** Un gruppo con più di 10 000 eventi genera un avviso di qualità dei dati `large_correlation_group` (con `path` nullo), perché potrebbe indicare un identificativo riutilizzato.
 - **COR-7** Non esiste alcuna correlazione per vicinanza temporale o per contenuto del messaggio.
 
 L'ordine tra eventi di servizi diversi riflette i timestamp riportati, che possono essere affetti da sfasamento degli orologi. La CLI lo segnala nell'intestazione di `inspect`.
+
+- **COR-8** `inspect ID` cerca l'identificativo sia tra i request_id sia tra i trace_id. Il confronto è esatto e distingue maiuscole e minuscole; gli spazi esterni vengono rimossi come nei log. Se il valore compare come request_id in un gruppo e come trace_id in un altro, vengono mostrati entrambi i gruppi. Un ID che nei log significa "assente" (`-`, `null`, `0`…, §2.4) è un errore d'uso (codice 2); un ID mai visto termina con il codice 4.
+- **COR-9** La timeline testuale mostra per ogni evento:
+  - l'ora UTC, solo l'ora del giorno se la sequenza cade in un unico giorno;
+  - lo scarto dal primo evento con timestamp, in millisecondi sotto il secondo e in secondi con tre decimali sopra;
+  - livello, servizio e messaggio;
+  - su una seconda riga, sorgente e riga, durata e attributi.
+
+  Gli eventi senza timestamp sono in fondo e marcati `no time`. Un evento con lo stesso timestamp del precedente ma proveniente da un altro file è marcato `~`, e una legenda spiega che il loro ordine è indeterminato (COR-4).
 
 ---
 
@@ -295,7 +304,7 @@ Gli stessi gruppi alimentano anche la sezione `top_errors` del report (i primi `
 |---|---|---|
 | `log-tracer analyze PATH...` | Esegue l'analisi completa e stampa un riepilogo testuale o, con `--format json`, il report (§6). | Sì (§8) |
 | `log-tracer top-errors PATH...` | Mostra solo gli errori più frequenti, come elenco o, con `--format json`, come documento JSON ridotto (REP-5). | No |
-| `log-tracer inspect ID [PATH...]` | Mostra la timeline del gruppo che contiene l'ID, cercato sia come request_id sia come trace_id. Senza PATH usa gli input dell'ultima analisi salvata. | No |
+| `log-tracer inspect ID [PATH...]` | Mostra la timeline del gruppo che contiene l'ID, cercato sia come request_id sia come trace_id (COR-8, COR-9). Senza PATH usa gli input dell'ultima analisi salvata; finché lo stato persistente non è disponibile (§8), PATH è obbligatorio. | No |
 | `log-tracer report` | Mostra o esporta il report dell'ultima analisi salvata, senza rieseguirla. | No |
 | `log-tracer --version` | Stampa la versione. | No |
 
@@ -335,7 +344,7 @@ I filtri `--service`, `--since` e `--until` definiscono il **perimetro dell'anal
 |---|---|
 | 0 | Successo, anche quando ci sono finding o righe non interpretabili. |
 | 1 | È stata raggiunta la soglia di `--fail-on`. |
-| 2 | Errore d'uso o di configurazione: opzione non valida o file di configurazione non valido. |
+| 2 | Errore d'uso o di configurazione: opzione non valida, file di configurazione non valido, ID di `inspect` che significa "assente". |
 | 3 | Errore di input, output o stato: percorso inesistente, nessun file supportato, nessuna sorgente leggibile, file di `--output` non scrivibile, nessuna analisi salvata, report salvato incompatibile. |
 | 4 | `inspect`: identificativo non trovato. |
 | 70 | Errore interno, cioè un bug. Viene stampato un messaggio con il traceback su stderr. |
@@ -358,13 +367,14 @@ I filtri `--service`, `--since` e `--until` definiscono il **perimetro dell'anal
 | `summary` | `events`, `unparsed_lines`, `time_range` (`start` e `end`), `levels` (conteggio per ogni livello, inclusi quelli a zero), `correlation_groups`, `uncorrelated_events`, `findings_by_severity` |
 | `data_quality` | `unparsed_by_reason`, `unparsed_samples`, `field_issues` (conteggio per problema, ad esempio `timestamp.assumed_utc`), `warnings` (per ogni avviso: `code`, `path`, `message`; ING-9) |
 | `rules` | Per ogni regola: `rule`, `status` e `reason`. |
-| `top_errors` | Per ogni gruppo: `service`, `fingerprint`, `count`, `first_seen`, `last_seen`, `events`. |
+| `top_errors` | Per ogni gruppo: `service`, `fingerprint`, `count`, `first_seen`, `last_seen`, `events`, `correlation_groups` (numero di sequenze che contengono almeno un suo evento), `correlation_ids` (le loro etichette, in ordine di prima occorrenza, al massimo `max_examples`). |
 | `findings` | Elenco dei finding (§4). |
 
 - **REP-2** Gli eventi sono riferiti come `{"path": …, "line": …}`. Il report non contiene il contenuto integrale dei log, fatta eccezione per gli estratti delle righe non interpretabili.
 - **REP-3** I percorsi sono riportati come forniti dall'utente, in notazione POSIX. Il report non aggiunge percorsi assoluti che potrebbero esporre informazioni locali.
 - **REP-4** Per lo stesso input e la stessa configurazione, due report differiscono solo in `generated_at`.
 - **REP-5** `top-errors --format json` produce un documento con le sole chiavi `schema_version`, `tool`, `generated_at`, `inputs`, `skipped_files` e `top_errors`. Ognuna ha la stessa forma che ha nel report completo, così lo stesso codice può leggere entrambi i documenti.
+- **REP-6** `inspect --format json` produce un documento con le chiavi `schema_version`, `tool`, `generated_at`, `query`, `inputs`, `skipped_files` e `sequences`. Ogni sequenza contiene `label`, `request_ids`, `trace_ids`, `services`, `event_count`, `time_range` ed `events`. A differenza del report, che cita gli eventi solo come riferimenti (REP-2), qui gli eventi sono completi, perché mostrarne il contenuto è lo scopo di `inspect`. Ogni evento contiene `path`, `line`, `timestamp`, `level`, `raw_level`, `service`, `message`, `request_id`, `trace_id`, `duration_ms` e `attributes`.
 
 ---
 
@@ -428,6 +438,7 @@ critical_ms = 8000
 | Opzione o configurazione non valida | Si ferma | stderr | 2 |
 | Nessuna analisi salvata | Si ferma con un suggerimento | stderr | 3 |
 | ID non trovato in `inspect` | Si ferma con un messaggio | stderr | 4 |
+| ID di `inspect` che significa "assente" (`-`, `null`, `0`) | Si ferma con un messaggio d'uso | stderr | 2 |
 | File di `--output` non scrivibile | Si ferma prima di stampare su stdout | stderr | 3 |
 | Soglia di `--fail-on` raggiunta | Stampa l'output per intero, poi il motivo | stdout e stderr | 1 |
 | Errore inatteso | Messaggio e traceback | stderr | 70 |
