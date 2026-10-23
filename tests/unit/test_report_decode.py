@@ -9,7 +9,7 @@ import json
 import tempfile
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any
+from typing import Any, NoReturn
 
 import pytest
 from hypothesis import given
@@ -318,17 +318,33 @@ def test_malformed_document_is_rejected(data: dict[str, Any], message: str) -> N
             "not valid JSON: Expecting property name enclosed in double quotes (line 1, column 2)",
         ),
         ("[]", "the document must be a JSON object, got a list"),
-        ("[" * 100_000, "not valid JSON: nested too deeply"),
         ('{"a": NaN}', "not valid JSON: NaN is not allowed"),
     ],
-    # Short ids: pytest puts the id in PYTEST_CURRENT_TEST, and Windows limits
-    # an environment variable to 32 767 characters.
-    ids=["syntax", "not-an-object", "nested", "nan"],
+    ids=["syntax", "not-an-object", "nan"],
 )
 def test_invalid_json_is_rejected(text: str, message: str) -> None:
     with pytest.raises(ReportDecodeError) as excinfo:
         loads(text)
     assert str(excinfo.value) == message
+
+
+def test_deeply_nested_json_is_rejected() -> None:
+    # json.loads raises RecursionError here in most builds, but a plain
+    # JSONDecodeError in others (seen with Python 3.14 in CI): either way the
+    # document is invalid JSON, and no RecursionError escapes.
+    with pytest.raises(ReportDecodeError) as excinfo:
+        loads("[" * 100_000)
+    assert str(excinfo.value).startswith("not valid JSON: ")
+
+
+def test_recursion_error_is_reported_as_too_deep(monkeypatch: pytest.MonkeyPatch) -> None:
+    def too_deep(*_args: object, **_kwargs: object) -> NoReturn:
+        raise RecursionError("maximum recursion depth exceeded")
+
+    monkeypatch.setattr(json, "loads", too_deep)  # the module json_report calls
+    with pytest.raises(ReportDecodeError) as excinfo:
+        loads("{}")
+    assert str(excinfo.value) == "not valid JSON: nested too deeply"
 
 
 def test_round_trip_survives_json_reparsing() -> None:
