@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Stato | Bozza in revisione |
+| Stato | Approvata per la v0.1.0 |
 | Versione software di riferimento | 0.1.0 |
 | Ultimo aggiornamento | 2026-10-23 |
 
@@ -531,6 +531,8 @@ Il workflow si avvia su `push` verso `main` e su `pull_request`, con `permission
 | 9 | Consolidamento: grandi input, revisione dei casi limite, revisione della copertura | — |
 | 10 | Margine, rifinitura, rilascio `v0.1.0` | — |
 
+Tutti gli incrementi sono completati. Il rilascio `v0.1.0` è il tag annotato del commit su cui il workflow di CI è verde (D-32).
+
 ---
 
 ## 11. Compromessi noti ed evoluzioni possibili
@@ -543,3 +545,5 @@ Il workflow si avvia su `push` verso `main` e su `pull_request`, con `permission
 | Report salvato e non ricalcolato | `report` riflette l'analisi passata anche se i file sono cambiati | Confronto tra due report salvati (`diff`) |
 | `top-errors` esegue l'intera pipeline | Lavoro superfluo, trascurabile alle dimensioni della v0.1 | Pipeline selettiva per regole |
 | Formato testuale unico | Altri formati richiedono una conversione preliminare | Un modulo `*_format.py` per ogni nuovo formato, senza modificare il resto |
+| Nessun evento multi-riga nel testo (ex Q-2) | Ogni riga di uno stack trace dopo la prima è conteggiata come non interpretabile | Nella v0.2, considerare continuazione le righe che iniziano con spazio o tabulazione |
+| Solo testo e JSON come output (ex Q-3) | Nessun report da condividere con chi non usa il terminale | Un report HTML generato dal JSON, senza cambiare l'analisi |

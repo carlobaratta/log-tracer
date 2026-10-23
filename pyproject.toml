@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.25"]
+requires = ["hatchling>=1.27"]  # 1.27: PEP 639 license metadata
 build-backend = "hatchling.build"
 
 [project]
@@ -7,13 +7,23 @@ name = "log-tracer"
 dynamic = ["version"]
 description = "Local, offline CLI that analyzes log files and reports recurring problems with deterministic rules."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Carlo Baratta" }]
+keywords = ["logs", "log-analysis", "cli", "diagnostics", "observability", "offline"]
 requires-python = ">=3.12"
+# Minimums verified with the whole test suite: older typer releases break with
+# click 8.2+ (make_metavar), which they do not exclude.
 dependencies = [
-    "typer>=0.12",
+    "typer>=0.16",
     "rich>=13.7",
 ]
 classifiers = [
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -21,6 +31,12 @@ classifiers = [
     "Topic :: System :: Logging",
     "Typing :: Typed",
 ]
+
+[project.urls]
+Homepage = "https://github.com/carlobaratta/log-tracer"
+Documentation = "https://github.com/carlobaratta/log-tracer/blob/main/docs/demo.md"
+Changelog = "https://github.com/carlobaratta/log-tracer/blob/main/CHANGELOG.md"
+Issues = "https://github.com/carlobaratta/log-tracer/issues"
 
 [project.scripts]
 log-tracer = "log_tracer.cli:main"
@@ -39,6 +55,23 @@ path = "src/log_tracer/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/log_tracer"]
+
+# An explicit list: a local build must not pick up untracked files, such as the
+# state of editor or assistant tools in the working tree.
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/docs",
+    "/examples",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE",
+    "/SPEC.md",
+    "/ARCHITECTURE.md",
+    "/uv.lock",
+    "/.gitattributes",
+]
 
 [tool.ruff]
 line-length = 100

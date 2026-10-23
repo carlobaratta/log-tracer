@@ -2,7 +2,7 @@
 
 Log Tracer is a local, offline command-line tool for analyzing log files. It reads them, normalizes every line into a common event model, and reports recurring problems with deterministic, documented rules. The same input and configuration always produce the same report. It needs no network access, credentials, or external services.
 
-> **Status: early development (increment 9 of 10).** Log Tracer reads text and JSON Lines logs, from single files or whole directories, correlates events by `request_id` and `trace_id`, shows the timeline of a request, and applies four diagnostic rules, in the terminal or as JSON, with thresholds you can configure. The analysis can be limited to some services or to a time interval, and the last one is saved, so it can be shown again with `report`. A [guided demo](docs/demo.md) runs on the bundled examples. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
+> **Version 0.1.0.** Log Tracer reads text and JSON Lines logs, from single files or whole directories, correlates events by `request_id` and `trace_id`, shows the timeline of a request, and applies four diagnostic rules, in the terminal or as JSON, with thresholds you can configure. The analysis can be limited to some services or to a time interval, and the last one is saved, so it can be shown again with `report`. A [guided demo](docs/demo.md) runs on the bundled examples, and the [changelog](CHANGELOG.md) lists what this version contains.
 
 ## Requirements
 
@@ -11,7 +11,13 @@ Log Tracer is a local, offline command-line tool for analyzing log files. It rea
 
 ## Installation
 
-Install the package from a clone of the repository:
+Install a released version directly from GitHub:
+
+```bash
+pip install "git+https://github.com/carlobaratta/log-tracer.git@v0.1.0"
+```
+
+The wheel is also attached to the [GitHub release](https://github.com/carlobaratta/log-tracer/releases/tag/v0.1.0). From a clone of the repository:
 
 ```bash
 pip install .
@@ -68,6 +74,7 @@ Top errors
 Output on stdout is either the summary or a single JSON document, so you can pipe it to other programs; errors, warnings and hints go to stderr. Colors are used only on a terminal, and `NO_COLOR` turns them off. Text taken from the logs is always shown literally: terminal control sequences and bidirectional-override characters are displayed as escapes such as `\x1b`. Log Tracer also warns when at least half of a file's lines cannot be parsed, because this usually means the file uses another format, and when one identifier links more than 10 000 events, which usually means it is reused. The JSON report contains:
 
 - the identity of each input (path, size, SHA-256);
+- the configuration and the filters used;
 - line counts: events, blank lines, and unparsed lines with the reason for each;
 - the distribution of log levels;
 - the most frequent error groups;
@@ -171,7 +178,7 @@ Error: log-tracer.toml: unknown key 'high_latency.warn' (did you mean 'warn_ms'?
 | 0 | Analysis completed, even if there are findings or unparsable lines |
 | 1 | `--fail-on` was given and a finding reached that severity |
 | 2 | Invalid command-line usage, or invalid `--config` file |
-| 3 | Input, output or state error: missing path, unsupported file type, directory without supported files, no readable file, `--output` file not writable, no saved analysis (or one that cannot be read or saved) |
+| 3 | Input, output or state error: missing path, unsupported file type, directory without supported files, no readable file, `--output` file not writable, no saved analysis (or one that cannot be read or saved), a file of the saved analysis that no longer exists |
 | 4 | `inspect`: no event has that `request_id` or `trace_id` |
 | 70 | Internal error, which is a bug. A traceback is printed on stderr |
 
@@ -198,12 +205,22 @@ Text logs follow one documented line format (see [SPEC.md §2.2](SPEC.md#22-form
 2026-10-16T14:03:24.902Z ERROR [payments] Payment gateway timeout after 2500 ms request_id=req-184 duration_ms=2500
 ```
 
-- **Timestamp:** ISO 8601. A timestamp without an offset is assumed to be UTC, and the report records this assumption.
+- **Timestamp:** ISO 8601 with seconds, such as `2026-10-16T14:03:24Z` or `2026-10-16 14:03:24,902`. A timestamp without an offset is assumed to be UTC, and the report records this assumption.
 - **Trailing fields:** `request_id`, `trace_id` and `duration_ms` are mapped to the event model. Other `key=value` fields are kept as attributes.
 
 #### JSON Lines
 
 Common field names are recognized: for example `timestamp`, `ts` or `@timestamp` for the time, and `message` or `msg` for the message. The full list of aliases and type rules is in [SPEC.md §2.3](SPEC.md#23-formato-json-lines-jsonl). Other fields are kept as attributes. A line that is not valid JSON, or is not an object, is counted as unparsed. An object without a timestamp is still analyzed as an event without a time.
+
+## Limitations
+
+Version 0.1.0 deliberately keeps a narrow scope (see [SPEC.md §1.1](SPEC.md#11-fuori-perimetro-per-la-v010) and [ARCHITECTURE.md §11](ARCHITECTURE.md#11-compromessi-noti-ed-evoluzioni-possibili)):
+
+- Text logs must follow the one documented line format; a multi-line message, such as a stack trace, is counted as unparsed lines after its first line.
+- All events are kept in memory: a few million lines is the practical limit.
+- Spikes are found in fixed windows aligned to the Unix epoch, so a burst across two windows may be split.
+- `report` shows the saved analysis as it was: it does not notice that the logs have changed (`inspect` without paths does).
+- Order across services follows each service's own clock.
 
 ## Development
 
@@ -225,4 +242,4 @@ Tests are organized as unit, integration and end-to-end tests. A test cites the 
 - [docs/demo.md](docs/demo.md) is a guided tour of every command on `examples/logs/`. Its commands are run by the test suite.
 - [ARCHITECTURE.md](ARCHITECTURE.md) covers modules, dependency rules, the data model, the test strategy and CI.
 
-Both documents are written in Italian; code, CLI messages and JSON keys are in English.
+SPEC.md and ARCHITECTURE.md are written in Italian. This README, the demo, the [changelog](CHANGELOG.md), the code, CLI messages and JSON keys are in English. Log Tracer is released under the [MIT license](LICENSE).

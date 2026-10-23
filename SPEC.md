@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Stato | Bozza in revisione |
+| Stato | Approvata per la v0.1.0 |
 | Versione software di riferimento | 0.1.0 |
 | Ultimo aggiornamento | 2026-10-23 |
 
@@ -478,19 +478,19 @@ Gli errori di contenuto (righe e campi) non interrompono mai l'analisi. Gli erro
 
 ## 11. Criteri di accettazione v0.1.0
 
-| # | Criterio | Verifica |
-|---|---|---|
-| A1 | Si installa seguendo il README | Job CI `package`: build della wheel, installazione in un ambiente pulito, `log-tracer --version` |
-| A2 | Analizza `text` e `jsonl` | Test d'integrazione su `examples/` |
-| A3 | Normalizza in modo coerente | Test unitari parametrizzati per ING, JL e §2.4 |
-| A4 | Esegue le 4 regole documentate | Test unitari per RUL-1…4, inclusi i casi di skip |
-| A5 | Produce un riepilogo testuale e un JSON valido | Test e2e: `json.loads(stdout)` e confronto con `examples/expected_report.json` |
-| A6 | Gestisce gli input malformati come da §9 | Test e2e per ogni riga della tabella (`tests/e2e/test_error_table.py`) |
-| A7 | La suite di test è verde | `pytest` in CI su tutta la matrice |
-| A8 | Lint e tipi senza errori | `ruff check`, `ruff format --check`, `mypy --strict` in CI |
-| A9 | CI funzionante | Workflow verde su GitHub |
-| A10 | Demo riproducibile | `docs/demo.md` con comandi eseguibili su `examples/` |
-| A11 | Nessuna dipendenza remota | NFR-1 e nessuna credenziale richiesta |
+| # | Criterio | Verifica | Esito per la v0.1.0 |
+|---|---|---|---|
+| A1 | Si installa seguendo il README | Job CI `package`: build della wheel, installazione in un ambiente pulito, `log-tracer --version` | Soddisfatto: job `package`; verificato anche in locale con wheel e sdist, e con le versioni minime delle dipendenze (`typer` 0.16, `rich` 13.7) |
+| A2 | Analizza `text` e `jsonl` | Test d'integrazione su `examples/` | Soddisfatto: `tests/e2e/test_cli_analyze.py`, `tests/integration/test_ingest.py` |
+| A3 | Normalizza in modo coerente | Test unitari parametrizzati per ING, JL e §2.4 | Soddisfatto: `test_fields.py`, `test_text_format.py`, `test_jsonl_format.py`, `test_properties.py` |
+| A4 | Esegue le 4 regole documentate | Test unitari per RUL-1…4, inclusi i casi di skip | Soddisfatto: `test_rule_*.py`, e `test_large_input.py` su 100 000 righe |
+| A5 | Produce un riepilogo testuale e un JSON valido | Test e2e: `json.loads(stdout)` e confronto con `examples/expected_report.json` | Soddisfatto: `tests/e2e/test_golden.py` |
+| A6 | Gestisce gli input malformati come da §9 | Test e2e per ogni riga della tabella (`tests/e2e/test_error_table.py`) | Soddisfatto: un caso per riga, confrontato con la tabella |
+| A7 | La suite di test è verde | `pytest` in CI su tutta la matrice | Condizione del rilascio: il tag si crea solo con il workflow verde |
+| A8 | Lint e tipi senza errori | `ruff check`, `ruff format --check`, `mypy --strict` in CI | Condizione del rilascio, come A7 |
+| A9 | CI funzionante | Workflow verde su GitHub | Condizione del rilascio, come A7 |
+| A10 | Demo riproducibile | `docs/demo.md` con comandi eseguibili su `examples/` | Soddisfatto: `tests/e2e/test_demo.py` esegue ogni comando |
+| A11 | Nessuna dipendenza remota | NFR-1 e nessuna credenziale richiesta | Soddisfatto: socket bloccati in ogni test (`tests/conftest.py`) |
 
 ---
 
@@ -528,11 +528,15 @@ Gli errori di contenuto (righe e campi) non interrompono mai l'analisi. Gli erro
 | D-28 | I test `slow` girano di default, in locale e in CI; `-m "not slow"` li esclude | Durano pochi secondi, e un test che non gira di default viene dimenticato. | Escluderli di default con `addopts`. |
 | D-29 | Le righe di §9 sono verificate da un unico test e2e parametrizzato, un caso per riga, anche quando sono coperte altrove | A6 diventa verificabile riga per riga; un test confronta i casi con la tabella, così aggiungere una riga senza test fa fallire la suite. | Lasciare la copertura sparsa nei test dei singoli comandi. |
 | D-30 | Le righe scoperte si coprono con test, senza `pragma: no cover`; la soglia resta all'85% | La soglia protegge dalle regressioni (NFR-8); escludere codice dalla misura nasconderebbe proprio le parti difensive. | Escludere `__main__.py` e le guardie difensive dalla copertura. |
+| D-31 | Licenza MIT, a nome di Carlo Baratta | È la licenza più semplice e diffusa per un progetto di portfolio, e permette a chiunque di riusare il codice. | Nessuna licenza: il codice resterebbe non riutilizzabile; Apache-2.0: più articolata, senza vantaggi a questa scala. |
+| D-32 | Versionamento SemVer, `CHANGELOG.md` nel formato Keep a Changelog, tag annotato `v0.1.0` creato solo sul commit con la CI verde | Il tag è la promessa che i criteri di §11 sono verificati; il CHANGELOG dice cosa contiene la versione senza leggere la cronologia. | Tag creato prima della CI, o note di rilascio solo su GitHub. |
+| D-33 | Nessuna pubblicazione su PyPI per la v0.1.0: si installa dal tag su GitHub o dalla wheel allegata alla release | PyPI richiede un account e credenziali, e il nome potrebbe essere già occupato; per un portfolio basta un'installazione riproducibile. | Pubblicare su PyPI o su TestPyPI. |
+| D-34 | Q-1 è chiusa da D-26; Q-2 e Q-3 diventano evoluzioni in ARCHITECTURE §11 | Le tre questioni non bloccano la v0.1.0. | Lasciarle aperte. |
 
 ## 13. Questioni aperte
 
 | ID | Domanda | Proposta |
 |---|---|---|
-| Q-1 | Lingua di README e documentazione: italiano o inglese? | Codice e CLI in inglese. Documentazione in italiano per ora; un README in inglese è consigliabile per il portfolio. |
-| Q-2 | Supporto multi-riga nel formato testuale? | Escluso nella v0.1.0. Nella v0.2 si potrebbero considerare continuazione le righe che iniziano con spazio o tab. |
-| Q-3 | Report HTML? | Solo dopo il completamento di tutti i criteri di §11. |
+| Q-1 | Lingua di README e documentazione: italiano o inglese? | Chiusa (D-26, D-34): README, demo e CHANGELOG in inglese; SPEC e ARCHITECTURE in italiano. |
+| Q-2 | Supporto multi-riga nel formato testuale? | Chiusa per la v0.1.0 (D-34): escluso, ed elencato tra le evoluzioni in ARCHITECTURE §11. |
+| Q-3 | Report HTML? | Chiusa per la v0.1.0 (D-34): elencato tra le evoluzioni in ARCHITECTURE §11. |
