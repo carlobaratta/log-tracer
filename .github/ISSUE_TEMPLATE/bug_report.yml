@@ -1,0 +1,63 @@
+name: Bug report
+description: Log Tracer crashes, gives a wrong result, or does not behave as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting a bug. For a security problem, do not use this form: follow the [security policy](https://github.com/carlobaratta/log-tracer/security/policy) instead.
+
+        **Remove sensitive data from every log excerpt and output you paste here**: hostnames, IP addresses, user names, email addresses, tokens and keys. This issue is public.
+  - type: input
+    id: version
+    attributes:
+      label: Log Tracer version
+      description: The output of `log-tracer --version`.
+      placeholder: log-tracer 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Python version and operating system
+      placeholder: Python 3.13.1, Ubuntu 24.04
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: Command
+      description: The exact command you ran, with its options.
+      render: shell
+      placeholder: log-tracer analyze logs/ --format json
+    validations:
+      required: true
+  - type: textarea
+    id: input
+    attributes:
+      label: Minimal input
+      description: The smallest log excerpt, and configuration file if you used one, that reproduces the problem. Anonymize it first.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What you expected to happen. If SPEC.md or the README documents it, link the requirement or section.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead, with the output on stdout and stderr. Exit code 70 means an internal error; include the traceback.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: exit-code
+    attributes:
+      label: Exit code
+      description: Run `echo $?` (or `echo $LASTEXITCODE` in PowerShell) right after the command.
+      placeholder: "70"

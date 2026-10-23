@@ -1,0 +1,42 @@
+name: Feature request
+description: Propose a new feature or a change in behavior.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Log Tracer's behavior is specified in [SPEC.md](https://github.com/carlobaratta/log-tracer/blob/main/SPEC.md), so a new feature starts as a change to the specification. Please describe the problem before the solution.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and why is it hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: How should Log Tracer behave? Include an example command and the output you would expect.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other solutions or workarounds you have considered.
+  - type: input
+    id: requirements
+    attributes:
+      label: Related requirements
+      description: IDs of the SPEC.md requirements this changes, if you know them.
+      placeholder: CLI-4, JL-6
+  - type: checkboxes
+    id: principles
+    attributes:
+      label: Project principles
+      options:
+        - label: The proposal keeps Log Tracer offline, with no network access.
+          required: true
+        - label: The proposal keeps the report deterministic for the same input and configuration.
+          required: true

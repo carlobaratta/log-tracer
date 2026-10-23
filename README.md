@@ -240,6 +240,8 @@ uv run mypy                  # strict type checking of src/ and tests/
 
 Tests are organized as unit, integration and end-to-end tests. A test cites the requirement ID from SPEC.md that it verifies. Every row of the error-handling table in SPEC.md §9 has its own end-to-end case, and the tests marked `slow` analyze 100 000 generated lines. `examples/expected_report.json` is a golden file: the report of `analyze examples/logs/` must match it, except for `generated_at`. See [docs/demo.md](docs/demo.md#regenerating-the-golden-report) to regenerate it after an intended change.
 
+To propose a change, read [CONTRIBUTING.md](CONTRIBUTING.md). Security problems are reported privately, as described in [SECURITY.md](SECURITY.md).
+
 ## Documentation
 
 - [SPEC.md](SPEC.md) is the functional specification: formats, rules, CLI, report, error handling and acceptance criteria.
