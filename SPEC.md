@@ -4,7 +4,7 @@
 |---|---|
 | Stato | Bozza in revisione |
 | Versione software di riferimento | 0.1.0 |
-| Ultimo aggiornamento | 2026-10-22 |
+| Ultimo aggiornamento | 2026-10-23 |
 
 Questo documento descrive **cosa** fa Log Tracer v0.1.0 e come si comporta nei casi limite.
 Il **come** (moduli, dipendenze, modello dei dati, test, CI) è descritto in [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -520,6 +520,10 @@ Gli errori di contenuto (righe e campi) non interrompono mai l'analisi. Gli erro
 | D-20 | `--since` e `--until` accettano i timestamp dei log e anche una data sola (mezzanotte UTC) | Lo stesso formato dei log evita sorprese; la data sola è il caso d'uso più comune. | Accettare espressioni relative (`1h`, `yesterday`): dipendono dall'orologio e rendono il report non riproducibile. |
 | D-21 | Anche il documento di `top-errors` include `filters` | Senza, un elenco di errori filtrato sembrerebbe quello completo. | Lasciare REP-5 invariato. |
 | D-22 | Lo schema resta `1.0` anche con la chiave `filters` | La v0.1.0 non è ancora stata rilasciata, quindi non esistono consumatori da proteggere; un report salvato prima dell'aggiunta viene rifiutato (`missing key 'filters'`) con il suggerimento di rieseguire `analyze`. | Passare a `1.1` e trattare `filters` come facoltativo. |
+| D-23 | Gli esempi includono `batch.log`, una raffica di errori di un job notturno | La demo mostra tutte e quattro le regole e un finding `high` con la configurazione di default, senza cambiare gli altri due file, che restano la base dei test esistenti. | Modificare `sample.log`: cambierebbe la timeline di `req-184` e i test che la verificano. |
+| D-24 | I comandi di `docs/demo.md` sono eseguiti da un test che ne controlla il codice di uscita; gli output nel documento sono estratti mantenuti a mano | La demo non può citare comandi che non funzionano; confrontare gli output legherebbe il test alla resa esatta di Rich. | Snapshot completi dell'output testuale. |
+| D-25 | Il test golden riguarda solo il report JSON di `analyze examples/logs/` | È la fonte da cui derivano riepilogo, `top-errors` e `report`, che hanno già test mirati. | Golden anche per il testo e per i documenti di `top-errors` e `inspect`. |
+| D-26 | `docs/demo.md` è in inglese, come il README | È la pagina pensata per chi valuta il progetto (Q-1); SPEC e ARCHITECTURE restano in italiano. | Demo in italiano. |
 
 ## 13. Questioni aperte
 

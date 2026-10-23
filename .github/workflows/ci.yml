@@ -82,3 +82,6 @@ jobs:
           /tmp/smoke/bin/log-tracer top-errors examples/logs/ --limit 3
           /tmp/smoke/bin/log-tracer inspect req-184 examples/logs/
           /tmp/smoke/bin/log-tracer analyze examples/logs/ --config examples/log-tracer.toml
+          /tmp/smoke/bin/log-tracer report --format json | /tmp/smoke/bin/python -m json.tool > /dev/null
+          /tmp/smoke/bin/log-tracer inspect req-184
+          /tmp/smoke/bin/log-tracer analyze examples/logs/ --service payments --no-save

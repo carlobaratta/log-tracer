@@ -151,14 +151,15 @@ def test_examples_directory_combines_text_and_json_lines() -> None:
     assert result.stderr == ""
 
     assert [(i["path"], i["format"], i["events"], i["unparsed"]) for i in report["inputs"]] == [
+        ("examples/logs/batch.log", "text", 11, 0),
         ("examples/logs/sample.jsonl", "jsonl", 9, 2),
         ("examples/logs/sample.log", "text", 25, 1),
     ]
     assert report["skipped_files"] == []
-    assert report["summary"]["events"] == 34
+    assert report["summary"]["events"] == 45
     assert (report["summary"]["correlation_groups"], report["summary"]["uncorrelated_events"]) == (
         5,
-        9,
+        20,
     )
     by_service = {g["service"]: g for g in report["top_errors"]}
     assert by_service["api-gateway"]["correlation_ids"] == [
@@ -168,10 +169,10 @@ def test_examples_directory_combines_text_and_json_lines() -> None:
     ]
     assert by_service["inventory"]["correlation_groups"] == 0
     assert report["summary"]["levels"] == {
-        "CRITICAL": 0,
-        "ERROR": 11,
+        "CRITICAL": 1,
+        "ERROR": 19,
         "WARNING": 6,
-        "INFO": 14,
+        "INFO": 16,
         "DEBUG": 2,
         "TRACE": 0,
         "UNKNOWN": 1,
@@ -185,6 +186,7 @@ def test_examples_directory_combines_text_and_json_lines() -> None:
     }
     assert report["data_quality"]["field_issues"]["timestamp.missing"] == 1
     assert [(g["service"], g["count"]) for g in report["top_errors"]] == [
+        ("scheduler", 9),
         ("api-gateway", 3),
         ("inventory", 3),
         ("payments", 3),
@@ -227,14 +229,31 @@ def test_examples_directory_combines_text_and_json_lines() -> None:
         "c3d4e5f6a7b8c9d0",
         "e5f6a7b8c9d0e1f2",
     ]
-    # RUL-4: errors per minute 2, 5, 2, 1 -> median 2, threshold 6 -> no spike.
+    # RUL-4, by hand: errors per minute from 14:03 are 2, 5, 2, 1, 9 -> median 2,
+    # threshold max(5, 3 x 2) = 6 -> only 14:07 (batch.log) is a spike, medium
+    # because 9 is below twice the threshold.
     assert [(r["rule"], r["status"]) for r in report["rules"]] == [
         ("recurring_error", "ok"),
         ("high_latency", "ok"),
         ("warning_before_error", "ok"),
         ("error_spike", "ok"),
     ]
-    assert len(report["findings"]) == 8
+    (spike,) = [f for f in report["findings"] if f["rule"] == "error_spike"]
+    assert (spike["severity"], spike["event_count"]) == ("medium", 9)
+    assert spike["title"] == "Error spike from 2026-10-16T14:07:00Z: 9 errors in 60 s"
+    # RUL-1: the nightly-export group has a CRITICAL event, so it is high.
+    severities = {
+        f["evidence"]["service"]: f["severity"]
+        for f in report["findings"]
+        if f["rule"] == "recurring_error"
+    }
+    assert severities == {
+        "scheduler": "high",
+        "api-gateway": "medium",
+        "payments": "medium",
+        "inventory": "medium",
+    }
+    assert len(report["findings"]) == 10
 
 
 def test_input_format_reads_a_log_file_as_json_lines(in_tmp: Path) -> None:
@@ -406,9 +425,15 @@ def test_text_summary_of_the_examples() -> None:
     out = result.stdout
     assert "\x1b" not in out  # CLI-3: no colors when stdout is not a terminal
     lines = [line.strip() for line in out.splitlines()]
-    assert lines[0] == "Log Tracer 0.1.0 · 2 files · 34 events · 3 unparsed lines"
-    assert "Time range (UTC): 2026-10-16T14:03:21.004Z → 2026-10-16T14:06:02.011Z" in lines
-    assert "Findings (8)" in lines
+    assert lines[0] == "Log Tracer 0.1.0 · 3 files · 45 events · 3 unparsed lines"
+    assert "Time range (UTC): 2026-10-16T14:03:21.004Z → 2026-10-16T14:07:38.900Z" in lines
+    assert "Findings (10)" in lines
+    assert [
+        "medium",
+        "error_spike",
+        "Error spike from 2026-10-16T14:07:00Z: 9 errors in 60 s",
+        "9",
+    ] in cells(out)
     assert [
         "medium",
         "warning_before_error",
@@ -427,13 +452,13 @@ def test_text_summary_of_the_examples() -> None:
         "Recurring error in inventory: Stock sync with warehouse failed: HTTP…",
         "3",
     ] in cells(out)
-    assert "1. 3x api-gateway: POST /checkout failed" in lines
+    assert "2. 3x api-gateway: POST /checkout failed" in lines
     assert (
         "first 14:03:24.910Z · last 14:05:23.897Z · 3 sequences · "
         "example examples/logs/sample.log:6"
     ) in lines
-    assert "Levels: ERROR 11 · WARNING 6 · INFO 14 · DEBUG 2 · UNKNOWN 1" in lines
-    assert "Correlation: 5 sequences · 9 uncorrelated events" in lines
+    assert "Levels: CRITICAL 1 · ERROR 19 · WARNING 6 · INFO 16 · DEBUG 2 · UNKNOWN 1" in lines
+    assert "Correlation: 5 sequences · 20 uncorrelated events" in lines
     assert "examples/logs/sample.jsonl (jsonl): 9 events, 2 unparsed" in lines
     assert "Unparsed lines: no_match 1 · invalid_json 1 · not_an_object 1" in lines
 
@@ -491,7 +516,7 @@ def test_fail_on_exits_with_code_1_after_printing_the_output(threshold: str) -> 
     assert result.exit_code == 1
     assert result.stdout.startswith("Log Tracer")
     assert result.stderr == (
-        f"Found 8 findings with severity {threshold} or higher (--fail-on {threshold})\n"
+        f"Found 10 findings with severity {threshold} or higher (--fail-on {threshold})\n"
     )
 
 
@@ -499,12 +524,15 @@ def test_fail_on_exits_with_code_1_after_printing_the_output(threshold: str) -> 
 def test_fail_on_keeps_stdout_valid_json() -> None:
     result = invoke("analyze", "examples/logs", "--format", "json", "--fail-on", "medium")
     assert result.exit_code == 1
-    assert len(json.loads(result.stdout)["findings"]) == 8
+    assert len(json.loads(result.stdout)["findings"]) == 10
 
 
 @pytest.mark.usefixtures("in_repo")
 def test_fail_on_below_the_threshold_exits_with_code_0() -> None:
-    result = invoke("analyze", "examples/logs", "--fail-on", "high")
+    # The two sample files alone have medium findings only (batch.log has a high one).
+    result = invoke(
+        "analyze", "examples/logs/sample.log", "examples/logs/sample.jsonl", "--fail-on", "high"
+    )
     assert result.exit_code == 0
     assert result.stderr == ""
 
@@ -529,7 +557,7 @@ def test_configuration_file_changes_the_thresholds() -> None:
         ("inventory", 1, 4, 1320.0, 1320.0, "medium"),
         ("orders-db", 1, 1, 1840.0, 1840.0, "medium"),
     }
-    assert len(report["findings"]) == 7
+    assert len(report["findings"]) == 9
     assert report["config"]["high_latency"]["services"] == {
         "api-gateway": {"warn_ms": 1000, "critical_ms": 2700},
         "payments": {"warn_ms": 3000, "critical_ms": 5000},
@@ -542,7 +570,8 @@ def test_fail_on_high_with_the_example_configuration() -> None:
         "analyze", "examples/logs", "--config", "examples/log-tracer.toml", "--fail-on", "high"
     )
     assert result.exit_code == 1
-    assert result.stderr == "Found 1 finding with severity high or higher (--fail-on high)\n"
+    # api-gateway latency (critical_ms 2700) and the scheduler errors (one CRITICAL).
+    assert result.stderr == "Found 2 findings with severity high or higher (--fail-on high)\n"
 
 
 @pytest.mark.parametrize(

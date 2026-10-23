@@ -2,7 +2,7 @@
 
 Log Tracer is a local, offline command-line tool for analyzing log files. It reads them, normalizes every line into a common event model, and reports recurring problems with deterministic, documented rules. The same input and configuration always produce the same report. It needs no network access, credentials, or external services.
 
-> **Status: early development (increment 7 of 10).** Log Tracer reads text and JSON Lines logs, from single files or whole directories, correlates events by `request_id` and `trace_id`, shows the timeline of a request, and applies four diagnostic rules, in the terminal or as JSON, with thresholds you can configure. The analysis can be limited to some services or to a time interval, and the last one is saved, so it can be shown again with `report`. Examples, golden tests and a demo come next. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
+> **Status: early development (increment 8 of 10).** Log Tracer reads text and JSON Lines logs, from single files or whole directories, correlates events by `request_id` and `trace_id`, shows the timeline of a request, and applies four diagnostic rules, in the terminal or as JSON, with thresholds you can configure. The analysis can be limited to some services or to a time interval, and the last one is saved, so it can be shown again with `report`. A [guided demo](docs/demo.md) runs on the bundled examples. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
 
 ## Requirements
 
@@ -43,20 +43,27 @@ log-tracer inspect req-184                                # timeline, from the i
 ```
 
 ```
-Log Tracer 0.1.0 · 2 files · 34 events · 3 unparsed lines
-Time range (UTC): 2026-10-16T14:03:21.004Z → 2026-10-16T14:06:02.011Z
+$ log-tracer analyze examples/logs/
+Log Tracer 0.1.0 · 3 files · 45 events · 3 unparsed lines
+Time range (UTC): 2026-10-16T14:03:21.004Z → 2026-10-16T14:07:38.900Z
 
-Findings (3)
-Severity   Rule              Title                                                       Events
-───────────────────────────────────────────────────────────────────────────────────────────────
-medium     recurring_error   Recurring error in api-gateway: POST /checkout failed            3
+Findings (10)
+Severity   Rule                   Title                                                       Events
+────────────────────────────────────────────────────────────────────────────────────────────────────
+high       recurring_error        Recurring error in scheduler: Job nightly-export failed:         9
+                                  worker <num>…
+medium     error_spike            Error spike from 2026-10-16T14:07:00Z: 9 errors in 60 s          9
 ...
 
 Top errors
-1. 3x api-gateway: POST /checkout failed
-   first 14:03:24.910Z · last 14:05:23.897Z · example examples/logs/sample.log:6
+1. 9x scheduler: Job nightly-export failed: worker <num> crashed
+   first 14:07:03.120Z · last 14:07:38.415Z · example examples/logs/batch.log:2
+2. 3x api-gateway: POST /checkout failed
+   first 14:03:24.910Z · last 14:05:23.897Z · 3 sequences · example examples/logs/sample.log:6
 ...
 ```
+
+[docs/demo.md](docs/demo.md) walks through every command on the bundled logs, with their output.
 
 Output on stdout is either the summary or a single JSON document, so you can pipe it to other programs; errors, warnings and hints go to stderr. Colors are used only on a terminal, and `NO_COLOR` turns them off. Text taken from the logs is always shown literally: terminal control sequences and bidirectional-override characters are displayed as escapes such as `\x1b`. Log Tracer also warns when at least half of a file's lines cannot be parsed, because this usually means the file uses another format. The JSON report contains:
 
@@ -209,11 +216,12 @@ uv run ruff format --check   # formatting
 uv run mypy                  # strict type checking of src/ and tests/
 ```
 
-Tests are organized as unit, integration and end-to-end tests. A test cites the requirement ID from SPEC.md that it verifies.
+Tests are organized as unit, integration and end-to-end tests. A test cites the requirement ID from SPEC.md that it verifies. `examples/expected_report.json` is a golden file: the report of `analyze examples/logs/` must match it, except for `generated_at`. See [docs/demo.md](docs/demo.md#regenerating-the-golden-report) to regenerate it after an intended change.
 
 ## Documentation
 
 - [SPEC.md](SPEC.md) is the functional specification: formats, rules, CLI, report, error handling and acceptance criteria.
+- [docs/demo.md](docs/demo.md) is a guided tour of every command on `examples/logs/`. Its commands are run by the test suite.
 - [ARCHITECTURE.md](ARCHITECTURE.md) covers modules, dependency rules, the data model, the test strategy and CI.
 
 Both documents are written in Italian; code, CLI messages and JSON keys are in English.

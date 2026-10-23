@@ -1,0 +1,714 @@
+{
+  "schema_version": "1.0",
+  "tool": {
+    "name": "log-tracer",
+    "version": "0.1.0"
+  },
+  "generated_at": "2026-10-23T07:09:35.687107Z",
+  "config": {
+    "report": {
+      "max_examples": 10,
+      "top_errors": 10
+    },
+    "recurring_error": {
+      "min_occurrences": 3,
+      "high_count": 20
+    },
+    "high_latency": {
+      "warn_ms": 1000,
+      "critical_ms": 5000,
+      "services": {}
+    },
+    "warning_before_error": {
+      "medium_min_groups": 3
+    },
+    "error_spike": {
+      "window_s": 60,
+      "factor": 3.0,
+      "min_errors": 5
+    }
+  },
+  "filters": {
+    "services": [],
+    "since": null,
+    "until": null,
+    "excluded_events": 0,
+    "excluded_without_timestamp": 0
+  },
+  "inputs": [
+    {
+      "path": "examples/logs/batch.log",
+      "format": "text",
+      "size_bytes": 1112,
+      "sha256": "580b32d6580348eec80e64351ef6f2cef53260fb1ad731d83c9b03609ba58a78",
+      "lines": 11,
+      "blank_lines": 0,
+      "events": 11,
+      "unparsed": 0,
+      "error": null
+    },
+    {
+      "path": "examples/logs/sample.jsonl",
+      "format": "jsonl",
+      "size_bytes": 1697,
+      "sha256": "576e5469d25e257cf0a10d5ed2094bc5c9e9bc2f5fa09a9b02a8f4070af5d0ea",
+      "lines": 11,
+      "blank_lines": 0,
+      "events": 9,
+      "unparsed": 2,
+      "error": null
+    },
+    {
+      "path": "examples/logs/sample.log",
+      "format": "text",
+      "size_bytes": 3017,
+      "sha256": "d77905b16e07b0d0e64fc0a3e9146900ec785bf0766c409561848f1a37d4c9af",
+      "lines": 27,
+      "blank_lines": 1,
+      "events": 25,
+      "unparsed": 1,
+      "error": null
+    }
+  ],
+  "skipped_files": [],
+  "summary": {
+    "events": 45,
+    "unparsed_lines": 3,
+    "time_range": {
+      "start": "2026-10-16T14:03:21.004000Z",
+      "end": "2026-10-16T14:07:38.900000Z"
+    },
+    "levels": {
+      "CRITICAL": 1,
+      "ERROR": 19,
+      "WARNING": 6,
+      "INFO": 16,
+      "DEBUG": 2,
+      "TRACE": 0,
+      "UNKNOWN": 1
+    },
+    "correlation_groups": 5,
+    "uncorrelated_events": 20,
+    "findings_by_severity": {
+      "high": 1,
+      "medium": 9,
+      "low": 0
+    }
+  },
+  "data_quality": {
+    "unparsed_by_reason": {
+      "no_match": 1,
+      "invalid_timestamp": 0,
+      "invalid_json": 1,
+      "not_an_object": 1,
+      "no_known_fields": 0
+    },
+    "unparsed_samples": [
+      {
+        "path": "examples/logs/sample.jsonl",
+        "line": 9,
+        "reason": "invalid_json",
+        "excerpt": "{\"timestamp\": \"2026-10-16T14:05:30.000Z\", \"level\": \"info\", \"service\": \"inventory\", \"message\": \"Cache warmed\", \"entries\": 1200"
+      },
+      {
+        "path": "examples/logs/sample.jsonl",
+        "line": 10,
+        "reason": "not_an_object",
+        "excerpt": "[\"not\", \"an\", \"object\"]"
+      },
+      {
+        "path": "examples/logs/sample.log",
+        "line": 15,
+        "reason": "no_match",
+        "excerpt": "    at PgPool.connect (pool.js:88)"
+      }
+    ],
+    "field_issues": {
+      "timestamp.missing": 1,
+      "timestamp.invalid": 0,
+      "timestamp.assumed_utc": 1,
+      "level.missing": 0,
+      "level.unknown": 1,
+      "message.missing": 0,
+      "message.invalid": 0,
+      "service.invalid": 0,
+      "request_id.invalid": 0,
+      "trace_id.invalid": 0,
+      "duration_ms.invalid": 0,
+      "encoding.invalid": 0
+    },
+    "warnings": []
+  },
+  "rules": [
+    {
+      "rule": "recurring_error",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "rule": "high_latency",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "rule": "warning_before_error",
+      "status": "ok",
+      "reason": null
+    },
+    {
+      "rule": "error_spike",
+      "status": "ok",
+      "reason": null
+    }
+  ],
+  "top_errors": [
+    {
+      "service": "scheduler",
+      "fingerprint": "Job nightly-export failed: worker <num> crashed",
+      "count": 9,
+      "first_seen": "2026-10-16T14:07:03.120000Z",
+      "last_seen": "2026-10-16T14:07:38.415000Z",
+      "events": [
+        {
+          "path": "examples/logs/batch.log",
+          "line": 2
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 3
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 4
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 5
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 6
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 7
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 8
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 9
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 10
+        }
+      ],
+      "correlation_groups": 0,
+      "correlation_ids": []
+    },
+    {
+      "service": "api-gateway",
+      "fingerprint": "POST /checkout failed",
+      "count": 3,
+      "first_seen": "2026-10-16T14:03:24.910000Z",
+      "last_seen": "2026-10-16T14:05:23.897000Z",
+      "events": [
+        {
+          "path": "examples/logs/sample.log",
+          "line": 6
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 19
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 26
+        }
+      ],
+      "correlation_groups": 3,
+      "correlation_ids": [
+        "4bf92f3577b34da6",
+        "c3d4e5f6a7b8c9d0",
+        "e5f6a7b8c9d0e1f2"
+      ]
+    },
+    {
+      "service": "inventory",
+      "fingerprint": "Stock sync with warehouse failed: HTTP <num>",
+      "count": 3,
+      "first_seen": "2026-10-16T14:04:20.000000Z",
+      "last_seen": "2026-10-16T14:04:50.000000Z",
+      "events": [
+        {
+          "path": "examples/logs/sample.jsonl",
+          "line": 5
+        },
+        {
+          "path": "examples/logs/sample.jsonl",
+          "line": 6
+        },
+        {
+          "path": "examples/logs/sample.jsonl",
+          "line": 7
+        }
+      ],
+      "correlation_groups": 0,
+      "correlation_ids": []
+    },
+    {
+      "service": "payments",
+      "fingerprint": "Payment gateway timeout after <num> ms",
+      "count": 3,
+      "first_seen": "2026-10-16T14:03:24.902000Z",
+      "last_seen": "2026-10-16T14:05:23.891000Z",
+      "events": [
+        {
+          "path": "examples/logs/sample.log",
+          "line": 5
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 18
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 25
+        }
+      ],
+      "correlation_groups": 3,
+      "correlation_ids": [
+        "4bf92f3577b34da6",
+        "c3d4e5f6a7b8c9d0",
+        "e5f6a7b8c9d0e1f2"
+      ]
+    },
+    {
+      "service": "scheduler",
+      "fingerprint": "Job cleanup-sessions failed: connection refused <ip>",
+      "count": 2,
+      "first_seen": "2026-10-16T14:04:02.003000Z",
+      "last_seen": "2026-10-16T14:06:02.011000Z",
+      "events": [
+        {
+          "path": "examples/logs/sample.log",
+          "line": 14
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 27
+        }
+      ],
+      "correlation_groups": 0,
+      "correlation_ids": []
+    }
+  ],
+  "findings": [
+    {
+      "id": "recurring_error:f0175b177cb0",
+      "rule": "recurring_error",
+      "severity": "high",
+      "title": "Recurring error in scheduler: Job nightly-export failed: worker <num> crashed",
+      "description": "9 error events from service 'scheduler' match the pattern \"Job nightly-export failed: worker <num> crashed\".",
+      "evidence": {
+        "service": "scheduler",
+        "fingerprint": "Job nightly-export failed: worker <num> crashed",
+        "count": 9,
+        "min_occurrences": 3,
+        "high_count": 20,
+        "has_critical": true,
+        "first_seen": "2026-10-16T14:07:03.120000Z",
+        "last_seen": "2026-10-16T14:07:38.415000Z",
+        "correlation_groups": 0
+      },
+      "event_count": 9,
+      "events": [
+        {
+          "path": "examples/logs/batch.log",
+          "line": 2
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 3
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 4
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 5
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 6
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 7
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 8
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 9
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 10
+        }
+      ],
+      "correlation_ids": []
+    },
+    {
+      "id": "error_spike:98b7c07f10f4",
+      "rule": "error_spike",
+      "severity": "medium",
+      "title": "Error spike from 2026-10-16T14:07:00Z: 9 errors in 60 s",
+      "description": "9 ERROR or CRITICAL events between 2026-10-16T14:07:00Z and 2026-10-16T14:08:00Z (1 window of 60 s). The threshold is 6 errors per window, against a median of 2; the busiest window had 9.",
+      "evidence": {
+        "window_s": 60,
+        "start": "2026-10-16T14:07:00.000000Z",
+        "end": "2026-10-16T14:08:00.000000Z",
+        "windows": 1,
+        "errors": 9,
+        "peak_window_errors": 9,
+        "baseline": 2.0,
+        "threshold": 6.0,
+        "excluded_without_timestamp": 1
+      },
+      "event_count": 9,
+      "events": [
+        {
+          "path": "examples/logs/batch.log",
+          "line": 2
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 3
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 4
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 5
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 6
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 7
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 8
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 9
+        },
+        {
+          "path": "examples/logs/batch.log",
+          "line": 10
+        }
+      ],
+      "correlation_ids": []
+    },
+    {
+      "id": "high_latency:42261cbcbe61",
+      "rule": "high_latency",
+      "severity": "medium",
+      "title": "High latency in orders-db: 1 of 1 measured events over 1000 ms",
+      "description": "1 event from service 'orders-db' took longer than 1000 ms (slowest 1840 ms, p95 1840 ms).",
+      "evidence": {
+        "service": "orders-db",
+        "warn_ms": 1000,
+        "critical_ms": 5000,
+        "slow_events": 1,
+        "measured_events": 1,
+        "max_ms": 1840.0,
+        "p95_ms": 1840.0
+      },
+      "event_count": 1,
+      "events": [
+        {
+          "path": "examples/logs/sample.log",
+          "line": 12
+        }
+      ],
+      "correlation_ids": [
+        "a7b8c9d0e1f2a3b4"
+      ]
+    },
+    {
+      "id": "high_latency:b4e242080073",
+      "rule": "high_latency",
+      "severity": "medium",
+      "title": "High latency in api-gateway: 4 of 5 measured events over 1000 ms",
+      "description": "4 events from service 'api-gateway' took longer than 1000 ms (slowest 2797 ms, p95 2797 ms).",
+      "evidence": {
+        "service": "api-gateway",
+        "warn_ms": 1000,
+        "critical_ms": 5000,
+        "slow_events": 4,
+        "measured_events": 5,
+        "max_ms": 2797.0,
+        "p95_ms": 2797.0
+      },
+      "event_count": 4,
+      "events": [
+        {
+          "path": "examples/logs/sample.log",
+          "line": 26
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 6
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 19
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 13
+        }
+      ],
+      "correlation_ids": [
+        "e5f6a7b8c9d0e1f2",
+        "4bf92f3577b34da6",
+        "c3d4e5f6a7b8c9d0",
+        "a7b8c9d0e1f2a3b4"
+      ]
+    },
+    {
+      "id": "high_latency:bbf85c4c0a85",
+      "rule": "high_latency",
+      "severity": "medium",
+      "title": "High latency in payments: 3 of 4 measured events over 1000 ms",
+      "description": "3 events from service 'payments' took longer than 1000 ms (slowest 2500 ms, p95 2500 ms).",
+      "evidence": {
+        "service": "payments",
+        "warn_ms": 1000,
+        "critical_ms": 5000,
+        "slow_events": 3,
+        "measured_events": 4,
+        "max_ms": 2500.0,
+        "p95_ms": 2500.0
+      },
+      "event_count": 3,
+      "events": [
+        {
+          "path": "examples/logs/sample.log",
+          "line": 5
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 18
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 25
+        }
+      ],
+      "correlation_ids": [
+        "4bf92f3577b34da6",
+        "c3d4e5f6a7b8c9d0",
+        "e5f6a7b8c9d0e1f2"
+      ]
+    },
+    {
+      "id": "high_latency:ff86414ca0a8",
+      "rule": "high_latency",
+      "severity": "medium",
+      "title": "High latency in inventory: 1 of 4 measured events over 1000 ms",
+      "description": "1 event from service 'inventory' took longer than 1000 ms (slowest 1320 ms, p95 1320 ms).",
+      "evidence": {
+        "service": "inventory",
+        "warn_ms": 1000,
+        "critical_ms": 5000,
+        "slow_events": 1,
+        "measured_events": 4,
+        "max_ms": 1320.0,
+        "p95_ms": 1320.0
+      },
+      "event_count": 1,
+      "events": [
+        {
+          "path": "examples/logs/sample.jsonl",
+          "line": 8
+        }
+      ],
+      "correlation_ids": [
+        "e5f6a7b8c9d0e1f2"
+      ]
+    },
+    {
+      "id": "recurring_error:170ab5bc613b",
+      "rule": "recurring_error",
+      "severity": "medium",
+      "title": "Recurring error in api-gateway: POST /checkout failed",
+      "description": "3 error events from service 'api-gateway' match the pattern \"POST /checkout failed\".",
+      "evidence": {
+        "service": "api-gateway",
+        "fingerprint": "POST /checkout failed",
+        "count": 3,
+        "min_occurrences": 3,
+        "high_count": 20,
+        "has_critical": false,
+        "first_seen": "2026-10-16T14:03:24.910000Z",
+        "last_seen": "2026-10-16T14:05:23.897000Z",
+        "correlation_groups": 3
+      },
+      "event_count": 3,
+      "events": [
+        {
+          "path": "examples/logs/sample.log",
+          "line": 6
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 19
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 26
+        }
+      ],
+      "correlation_ids": [
+        "4bf92f3577b34da6",
+        "c3d4e5f6a7b8c9d0",
+        "e5f6a7b8c9d0e1f2"
+      ]
+    },
+    {
+      "id": "recurring_error:705f967e3c34",
+      "rule": "recurring_error",
+      "severity": "medium",
+      "title": "Recurring error in payments: Payment gateway timeout after <num> ms",
+      "description": "3 error events from service 'payments' match the pattern \"Payment gateway timeout after <num> ms\".",
+      "evidence": {
+        "service": "payments",
+        "fingerprint": "Payment gateway timeout after <num> ms",
+        "count": 3,
+        "min_occurrences": 3,
+        "high_count": 20,
+        "has_critical": false,
+        "first_seen": "2026-10-16T14:03:24.902000Z",
+        "last_seen": "2026-10-16T14:05:23.891000Z",
+        "correlation_groups": 3
+      },
+      "event_count": 3,
+      "events": [
+        {
+          "path": "examples/logs/sample.log",
+          "line": 5
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 18
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 25
+        }
+      ],
+      "correlation_ids": [
+        "4bf92f3577b34da6",
+        "c3d4e5f6a7b8c9d0",
+        "e5f6a7b8c9d0e1f2"
+      ]
+    },
+    {
+      "id": "recurring_error:aecb397a0b19",
+      "rule": "recurring_error",
+      "severity": "medium",
+      "title": "Recurring error in inventory: Stock sync with warehouse failed: HTTP <num>",
+      "description": "3 error events from service 'inventory' match the pattern \"Stock sync with warehouse failed: HTTP <num>\".",
+      "evidence": {
+        "service": "inventory",
+        "fingerprint": "Stock sync with warehouse failed: HTTP <num>",
+        "count": 3,
+        "min_occurrences": 3,
+        "high_count": 20,
+        "has_critical": false,
+        "first_seen": "2026-10-16T14:04:20.000000Z",
+        "last_seen": "2026-10-16T14:04:50.000000Z",
+        "correlation_groups": 0
+      },
+      "event_count": 3,
+      "events": [
+        {
+          "path": "examples/logs/sample.jsonl",
+          "line": 5
+        },
+        {
+          "path": "examples/logs/sample.jsonl",
+          "line": 6
+        },
+        {
+          "path": "examples/logs/sample.jsonl",
+          "line": 7
+        }
+      ],
+      "correlation_ids": []
+    },
+    {
+      "id": "warning_before_error:b44390542f7f",
+      "rule": "warning_before_error",
+      "severity": "medium",
+      "title": "Warning before error in 3 sequences: Payment provider slow, retrying → Payment gateway timeout after <num> ms",
+      "description": "In 3 correlated sequences the warning \"Payment provider slow, retrying\" (payments) precedes the error \"Payment gateway timeout after <num> ms\" (payments). This is a temporal correlation, not proven causation.",
+      "evidence": {
+        "warning_service": "payments",
+        "warning_fingerprint": "Payment provider slow, retrying",
+        "error_service": "payments",
+        "error_fingerprint": "Payment gateway timeout after <num> ms",
+        "groups": 3,
+        "median_gap_ms": 2502.0,
+        "undetermined_groups": 0
+      },
+      "event_count": 6,
+      "events": [
+        {
+          "path": "examples/logs/sample.log",
+          "line": 4
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 5
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 17
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 18
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 24
+        },
+        {
+          "path": "examples/logs/sample.log",
+          "line": 25
+        }
+      ],
+      "correlation_ids": [
+        "4bf92f3577b34da6",
+        "c3d4e5f6a7b8c9d0",
+        "e5f6a7b8c9d0e1f2"
+      ]
+    }
+  ]
+}

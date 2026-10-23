@@ -1,0 +1,11 @@
+2026-10-16T14:07:00.000Z INFO [scheduler] Job nightly-export started workers=9 job_id=exp-311
+2026-10-16T14:07:03.120Z ERROR [scheduler] Job nightly-export failed: worker 1 crashed job_id=exp-311
+2026-10-16T14:07:05.480Z ERROR [scheduler] Job nightly-export failed: worker 2 crashed job_id=exp-311
+2026-10-16T14:07:09.010Z ERROR [scheduler] Job nightly-export failed: worker 3 crashed job_id=exp-311
+2026-10-16T14:07:12.700Z ERROR [scheduler] Job nightly-export failed: worker 4 crashed job_id=exp-311
+2026-10-16T14:07:18.240Z ERROR [scheduler] Job nightly-export failed: worker 5 crashed job_id=exp-311
+2026-10-16T14:07:21.905Z ERROR [scheduler] Job nightly-export failed: worker 6 crashed job_id=exp-311
+2026-10-16T14:07:27.330Z ERROR [scheduler] Job nightly-export failed: worker 7 crashed job_id=exp-311
+2026-10-16T14:07:33.060Z ERROR [scheduler] Job nightly-export failed: worker 8 crashed job_id=exp-311
+2026-10-16T14:07:38.415Z CRITICAL [scheduler] Job nightly-export failed: worker 9 crashed job_id=exp-311
+2026-10-16T14:07:38.900Z INFO [scheduler] Job nightly-export aborted after 38.9 s job_id=exp-311

@@ -4,7 +4,7 @@
 |---|---|
 | Stato | Bozza in revisione |
 | Versione software di riferimento | 0.1.0 |
-| Ultimo aggiornamento | 2026-10-22 |
+| Ultimo aggiornamento | 2026-10-23 |
 
 Questo documento descrive **come** è costruito Log Tracer: moduli, dipendenze, modello dei dati, gestione degli errori, test e CI.
 I requisiti a cui si fa riferimento (`ING-3`, `RUL-2`, …) sono definiti in [SPEC.md](SPEC.md).
@@ -82,10 +82,13 @@ log-tracer/
 ├── tests/                      # vedi §8
 ├── examples/
 │   ├── logs/                   # input della demo: analyze examples/logs/
+│   │   ├── batch.log           # raffica di errori: error_spike e un finding high (D-23)
 │   │   ├── sample.log
 │   │   └── sample.jsonl
+│   ├── log-tracer.toml         # soglie per servizio, usate nella demo
 │   └── expected_report.json    # fuori da logs/, così non finisce tra i file saltati
-└── docs/demo.md
+├── .gitattributes              # examples/logs/** -text: stessi byte (e sha256) su ogni sistema
+└── docs/demo.md                # percorso guidato; i comandi sono eseguiti da tests/e2e/test_demo.py
 ```
 
 Rispetto alla struttura suggerita dalla specifica iniziale ci sono quattro differenze:
@@ -450,7 +453,8 @@ tests/
 
 - **Tracciabilità.** Ogni test cita il requisito che verifica, ad esempio `test_text_line_with_invalid_date_is_unparsed  # ING-6, §2.2`. Un requisito senza test è un requisito non verificato.
 - **Rete.** Una fixture `autouse` sostituisce `socket.socket.connect` con una funzione che fallisce, così l'offline (NFR-1) è verificato a ogni esecuzione.
-- **Test golden.** `examples/expected_report.json` viene confrontato con l'output di `analyze examples/logs/ --format json` dopo aver normalizzato `generated_at`. Rigenerarlo è un'azione esplicita documentata in `docs/demo.md`, mai automatica.
+- **Test golden.** `examples/expected_report.json` viene confrontato con l'output di `analyze examples/logs/ --format json` dopo aver normalizzato `generated_at` (`tests/e2e/test_golden.py`). Il confronto è sui dati JSON e non sui byte, quindi non dipende dai fine riga del file golden; i log di esempio invece sono protetti da `.gitattributes`, perché le loro dimensioni e i loro sha256 compaiono nel report. Rigenerarlo è un'azione esplicita documentata in `docs/demo.md`, mai automatica.
+- **Demo eseguibile.** `tests/e2e/test_demo.py` esegue in ordine ogni comando dei blocchi `bash` di `docs/demo.md`, da una copia di `examples/`, e verifica il codice di uscita indicato accanto (D-24).
 - **Hypothesis.** In locale il profilo `dev` genera esempi casuali, così ogni esecuzione può trovare casi nuovi. In CI il profilo `ci` (`HYPOTHESIS_PROFILE=ci`) usa `derandomize=True`: gli esempi dipendono solo dal test, e un fallimento si riproduce rieseguendo lo stesso commit. In entrambi `deadline=None` evita fallimenti dovuti alla lentezza dei runner.
 - **Grandi input.** Un test marcato `@pytest.mark.slow` genera 100 000 righe e verifica conteggi e risultati, **non i tempi**: le soglie di tempo in CI producono test instabili. I tempi si misurano a mano (NFR-3).
 
@@ -502,7 +506,7 @@ Dipendenze:
 |---|---|---|
 | `quality` | ubuntu, Python 3.12 | `uv sync --locked` → `ruff check` → `ruff format --check` → `mypy` |
 | `test` | ubuntu × {3.12, 3.13, 3.14}, più windows e macos con 3.14 | `uv run pytest --cov` (inclusi i test `slow`); report di copertura come artefatto |
-| `package` | ubuntu, dopo `test` | `uv build` → installazione della wheel in un venv pulito → `log-tracer --version` → `log-tracer analyze examples/logs/ --format json` validato con `python -m json.tool`, poi `analyze` in testo e `top-errors` |
+| `package` | ubuntu, dopo `test` | `uv build` → installazione della wheel in un venv pulito → `log-tracer --version` → `log-tracer analyze examples/logs/ --format json` validato con `python -m json.tool`, poi `analyze` in testo, `top-errors`, `inspect` con e senza percorsi, `report` e un'analisi filtrata |
 
 Il workflow si avvia su `push` verso `main` e su `pull_request`, con `permissions: contents: read`, `concurrency` per annullare le esecuzioni superate e un `timeout-minutes` su ogni job. Le action sono fissate alla versione maggiore.
 

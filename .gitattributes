@@ -1,0 +1,3 @@
+# The example logs are test inputs: their bytes (and so their size and SHA-256 in
+# examples/expected_report.json) must be the same on every system.
+examples/logs/** -text
