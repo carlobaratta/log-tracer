@@ -24,3 +24,14 @@ def _block_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(socket.socket, "connect", refuse)
     monkeypatch.setattr(socket.socket, "connect_ex", refuse)
     monkeypatch.setattr(socket, "create_connection", refuse)
+
+
+@pytest.fixture(autouse=True)
+def _no_forced_colors(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Output is checked as it is when stdout is not a terminal (CLI-3).
+
+    FORCE_COLOR, set in some developer shells, would make Rich add colors
+    anyway. Typer reads it, and GITHUB_ACTIONS, once at import time for its
+    own usage errors: the tests that read those messages strip the styles.
+    """
+    monkeypatch.delenv("FORCE_COLOR", raising=False)

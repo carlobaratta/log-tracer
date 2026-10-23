@@ -321,6 +321,9 @@ def test_malformed_document_is_rejected(data: dict[str, Any], message: str) -> N
         ("[" * 100_000, "not valid JSON: nested too deeply"),
         ('{"a": NaN}', "not valid JSON: NaN is not allowed"),
     ],
+    # Short ids: pytest puts the id in PYTEST_CURRENT_TEST, and Windows limits
+    # an environment variable to 32 767 characters.
+    ids=["syntax", "not-an-object", "nested", "nan"],
 )
 def test_invalid_json_is_rejected(text: str, message: str) -> None:
     with pytest.raises(ReportDecodeError) as excinfo:

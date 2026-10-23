@@ -382,7 +382,8 @@ def test_module_entry_point_runs_the_cli() -> None:
 
 
 def test_main_writes_utf8_whatever_the_locale(monkeypatch: pytest.MonkeyPatch) -> None:  # CLI-1
-    stdout = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    # newline="\n": the same bytes on Windows, where "\n" is written as "\r\n".
+    stdout = io.TextIOWrapper(io.BytesIO(), encoding="cp1252", newline="\n")
     stderr = io.StringIO()  # not a TextIOWrapper: there is no encoding to change
     monkeypatch.setattr(sys, "stdout", stdout)
     monkeypatch.setattr(sys, "stderr", stderr)

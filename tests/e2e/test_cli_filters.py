@@ -1,6 +1,7 @@
 """--service, --since and --until end to end (SPEC §5.2, D-9, D-18…D-21)."""
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ from typer.testing import CliRunner, Result
 from log_tracer.cli import app
 
 ROOT = Path(__file__).resolve().parents[2]
+ANSI_STYLE = re.compile(r"\x1b\[[0-9;]*m")
 runner = CliRunner()
 
 LOG = (
@@ -219,7 +221,9 @@ def test_invalid_filters_are_usage_errors(command: str, args: list[str], message
     result = invoke(command, "app.log", *args)
     assert result.exit_code == 2
     assert result.stdout == ""
-    assert message in " ".join(result.stderr.split())  # Typer may wrap the box
+    # Typer draws usage errors in a box that may wrap, and colors it when it
+    # finds GITHUB_ACTIONS, FORCE_COLOR or PY_COLORS (read at import time).
+    assert message in " ".join(ANSI_STYLE.sub("", result.stderr).split())
 
 
 def test_invalid_filters_are_checked_before_the_logs_are_read(tmp_path: Path) -> None:
