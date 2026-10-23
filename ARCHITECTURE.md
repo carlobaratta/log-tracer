@@ -444,19 +444,23 @@ Due casi limite della libreria standard sono stati verificati su Python 3.12 e 3
 
 ```
 tests/
-├── conftest.py          # make_event(), orologio fisso, blocco della rete (NFR-1)
-├── fixtures/            # piccoli file di log scritti a mano, uno per caso limite
+├── conftest.py          # profili di Hypothesis, blocco della rete (NFR-1)
+├── factories.py         # make_event(), make_report(), T0: costruttori dei modelli
+├── large_logs.py        # generatore deterministico di log grandi (D-27)
 ├── unit/
 ├── integration/
-└── e2e/
+└── e2e/                 # conftest.py: stato salvato fuori dal repository
 ```
+
+I casi limite non hanno file di fixture: ogni test scrive i propri log in `tmp_path`, così il contenuto è visibile accanto alle asserzioni.
 
 - **Tracciabilità.** Ogni test cita il requisito che verifica, ad esempio `test_text_line_with_invalid_date_is_unparsed  # ING-6, §2.2`. Un requisito senza test è un requisito non verificato.
 - **Rete.** Una fixture `autouse` sostituisce `socket.socket.connect` con una funzione che fallisce, così l'offline (NFR-1) è verificato a ogni esecuzione.
 - **Test golden.** `examples/expected_report.json` viene confrontato con l'output di `analyze examples/logs/ --format json` dopo aver normalizzato `generated_at` (`tests/e2e/test_golden.py`). Il confronto è sui dati JSON e non sui byte, quindi non dipende dai fine riga del file golden; i log di esempio invece sono protetti da `.gitattributes`, perché le loro dimensioni e i loro sha256 compaiono nel report. Rigenerarlo è un'azione esplicita documentata in `docs/demo.md`, mai automatica.
 - **Demo eseguibile.** `tests/e2e/test_demo.py` esegue in ordine ogni comando dei blocchi `bash` di `docs/demo.md`, da una copia di `examples/`, e verifica il codice di uscita indicato accanto (D-24).
 - **Hypothesis.** In locale il profilo `dev` genera esempi casuali, così ogni esecuzione può trovare casi nuovi. In CI il profilo `ci` (`HYPOTHESIS_PROFILE=ci`) usa `derandomize=True`: gli esempi dipendono solo dal test, e un fallimento si riproduce rieseguendo lo stesso commit. In entrambi `deadline=None` evita fallimenti dovuti alla lentezza dei runner.
-- **Grandi input.** Un test marcato `@pytest.mark.slow` genera 100 000 righe e verifica conteggi e risultati, **non i tempi**: le soglie di tempo in CI producono test instabili. I tempi si misurano a mano (NFR-3).
+- **Grandi input.** `tests/integration/test_large_input.py`, marcato `@pytest.mark.slow`, genera 100 000 righe con `tests/large_logs.py` e verifica conteggi e risultati, **non i tempi**: le soglie di tempo in CI producono test instabili. I valori attesi vengono dalla contabilità del generatore, cioè da ciò che ha scritto, e mai dal codice sotto test (D-27). I test `slow` girano di default, anche in CI; `-m "not slow"` li esclude (D-28). I tempi si misurano a mano con lo stesso generatore e sono documentati in `docs/demo.md` (NFR-3).
+- **Tabella degli errori.** `tests/e2e/test_error_table.py` ha un caso per ogni riga di SPEC §9, con comportamento, codice di uscita e dove l'esito è visibile, e verifica che i casi corrispondano alle righe della tabella nella SPEC (A6, D-29).
 
 ### 8.3 Casi limite richiesti dalla specifica iniziale
 

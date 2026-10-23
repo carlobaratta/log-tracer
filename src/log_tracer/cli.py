@@ -378,7 +378,10 @@ def _run(
             input_format=_input_format(input_format),
             filters=filters,
         )
-    _print_warnings((*report.ingestion.warnings, *report.filters.warnings))
+    # Every stage's warnings, in the order of data_quality.warnings (CLI-2).
+    _print_warnings(
+        (*report.ingestion.warnings, *report.filters.warnings, *report.analysis.warnings)
+    )
     return report
 
 

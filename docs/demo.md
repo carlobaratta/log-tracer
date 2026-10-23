@@ -214,6 +214,27 @@ Error: path not found: missing.log
 log-tracer analyze examples/logs/ --since yesterday  # exit 2
 ```
 
+## Performance
+
+NFR-3 asks for 100 000 lines (about 15 MB) in less than 10 seconds, with memory linear in the number of events. Measured on an Apple M4 laptop (16 GB, macOS 27.0.1) with Python 3.12.13, as the median of three runs of `log-tracer analyze DIR --no-save`; peak memory is the maximum resident set size reported by `/usr/bin/time -l`:
+
+| Lines | Size | Events | Time | Peak memory |
+|---:|---:|---:|---:|---:|
+| 100 000 | 14.3 MB | 99 800 | 1.24 s | 164 MB |
+| 200 000 | 28.6 MB | 199 600 | 2.47 s | 294 MB |
+| 400 000 | 57.3 MB | 399 200 | 4.89 s | 553 MB |
+
+Time and memory grow linearly: about 12 µs and 1.3 KB per event, on top of about 30 MB for the interpreter. Of the 400 000 lines, the 320 000 text lines take 3.75 s and the 80 000 JSON Lines take 1.04 s when analyzed on their own. All events are kept in memory (ARCHITECTURE §11), so a few million lines is the practical limit.
+
+The inputs come from a deterministic generator, the same one the large-input tests use: the same arguments always write the same bytes, with unparsable lines, unknown levels, events without a timestamp, a burst of errors and an identifier reused by more than 10 000 events. To repeat the measurement:
+
+```sh
+uv run python -m tests.large_logs /tmp/large --lines 100000
+/usr/bin/time -l log-tracer analyze /tmp/large --no-save > /dev/null
+```
+
+On Linux, use `/usr/bin/time -v`. This block is not run by the tests, since it writes large files. The tests check counts and results on 100 000 lines (`tests/integration/test_large_input.py`, marked `slow`), never timings, which would make CI unstable.
+
 ## Regenerating the golden report
 
 `tests/e2e/test_golden.py` compares the report of `analyze examples/logs/` with `examples/expected_report.json`, ignoring `generated_at`. When a change to the parsers, the rules or the report is intended, regenerate the file and review the diff before committing it:

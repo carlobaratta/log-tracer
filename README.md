@@ -2,7 +2,7 @@
 
 Log Tracer is a local, offline command-line tool for analyzing log files. It reads them, normalizes every line into a common event model, and reports recurring problems with deterministic, documented rules. The same input and configuration always produce the same report. It needs no network access, credentials, or external services.
 
-> **Status: early development (increment 8 of 10).** Log Tracer reads text and JSON Lines logs, from single files or whole directories, correlates events by `request_id` and `trace_id`, shows the timeline of a request, and applies four diagnostic rules, in the terminal or as JSON, with thresholds you can configure. The analysis can be limited to some services or to a time interval, and the last one is saved, so it can be shown again with `report`. A [guided demo](docs/demo.md) runs on the bundled examples. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
+> **Status: early development (increment 9 of 10).** Log Tracer reads text and JSON Lines logs, from single files or whole directories, correlates events by `request_id` and `trace_id`, shows the timeline of a request, and applies four diagnostic rules, in the terminal or as JSON, with thresholds you can configure. The analysis can be limited to some services or to a time interval, and the last one is saved, so it can be shown again with `report`. A [guided demo](docs/demo.md) runs on the bundled examples. See the [plan](ARCHITECTURE.md#10-piano-incrementale).
 
 ## Requirements
 
@@ -65,7 +65,7 @@ Top errors
 
 [docs/demo.md](docs/demo.md) walks through every command on the bundled logs, with their output.
 
-Output on stdout is either the summary or a single JSON document, so you can pipe it to other programs; errors, warnings and hints go to stderr. Colors are used only on a terminal, and `NO_COLOR` turns them off. Text taken from the logs is always shown literally: terminal control sequences and bidirectional-override characters are displayed as escapes such as `\x1b`. Log Tracer also warns when at least half of a file's lines cannot be parsed, because this usually means the file uses another format. The JSON report contains:
+Output on stdout is either the summary or a single JSON document, so you can pipe it to other programs; errors, warnings and hints go to stderr. Colors are used only on a terminal, and `NO_COLOR` turns them off. Text taken from the logs is always shown literally: terminal control sequences and bidirectional-override characters are displayed as escapes such as `\x1b`. Log Tracer also warns when at least half of a file's lines cannot be parsed, because this usually means the file uses another format, and when one identifier links more than 10 000 events, which usually means it is reused. The JSON report contains:
 
 - the identity of each input (path, size, SHA-256);
 - line counts: events, blank lines, and unparsed lines with the reason for each;
@@ -73,7 +73,7 @@ Output on stdout is either the summary or a single JSON document, so you can pip
 - the most frequent error groups;
 - findings, each with the evidence that justifies it.
 
-Unparsable lines are counted and reported, never silently dropped.
+Unparsable lines are counted and reported, never silently dropped. Analyzing 100 000 lines takes about 1.2 seconds on a recent laptop (see [docs/demo.md](docs/demo.md#performance)).
 
 ### Diagnostic rules
 
@@ -210,13 +210,14 @@ Common field names are recognized: for example `timestamp`, `ts` or `@timestamp`
 ```bash
 uv sync                      # create .venv with runtime and dev dependencies
 uv run pytest                # all tests
+uv run pytest -m "not slow"  # without the large-input tests (a few seconds faster)
 uv run pytest --cov          # with branch coverage (minimum 85%)
 uv run ruff check            # lint
 uv run ruff format --check   # formatting
 uv run mypy                  # strict type checking of src/ and tests/
 ```
 
-Tests are organized as unit, integration and end-to-end tests. A test cites the requirement ID from SPEC.md that it verifies. `examples/expected_report.json` is a golden file: the report of `analyze examples/logs/` must match it, except for `generated_at`. See [docs/demo.md](docs/demo.md#regenerating-the-golden-report) to regenerate it after an intended change.
+Tests are organized as unit, integration and end-to-end tests. A test cites the requirement ID from SPEC.md that it verifies. Every row of the error-handling table in SPEC.md §9 has its own end-to-end case, and the tests marked `slow` analyze 100 000 generated lines. `examples/expected_report.json` is a golden file: the report of `analyze examples/logs/` must match it, except for `generated_at`. See [docs/demo.md](docs/demo.md#regenerating-the-golden-report) to regenerate it after an intended change.
 
 ## Documentation
 

@@ -1,8 +1,10 @@
 """`log-tracer analyze` end to end: output contract and exit codes (SPEC §5)."""
 
+import io
 import json
 import os
 import re
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -286,6 +288,18 @@ def test_warnings_go_to_stderr_and_stdout_stays_valid_json(in_tmp: Path) -> None
     ]
 
 
+@pytest.mark.parametrize("command", ["analyze", "top-errors"])
+def test_analysis_warnings_go_to_stderr_too(in_tmp: Path, command: str) -> None:  # COR-6, CLI-2
+    line = "2026-10-16T14:00:00Z DEBUG [api] Health check ok request_id=req-health\n"
+    (in_tmp / "app.log").write_text(line * 10_001, encoding="utf-8")
+    result = invoke(command, "app.log")
+    assert result.exit_code == 0
+    assert result.stderr == (
+        "Warning: sequence req-health contains 10001 events: "
+        "an identifier may be reused by unrelated requests\n"
+    )
+
+
 # --- Errors and exit codes (SPEC §5.4, §9) ----------------------------------------
 
 
@@ -365,6 +379,32 @@ def test_module_entry_point_runs_the_cli() -> None:
     )
     assert completed.returncode == 0
     assert completed.stdout == f"log-tracer {__version__}\n"
+
+
+def test_main_writes_utf8_whatever_the_locale(monkeypatch: pytest.MonkeyPatch) -> None:  # CLI-1
+    stdout = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    stderr = io.StringIO()  # not a TextIOWrapper: there is no encoding to change
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(sys, "stderr", stderr)
+    monkeypatch.setattr(sys, "argv", ["log-tracer", "--version"])
+    with pytest.raises(SystemExit) as excinfo:
+        cli.main()
+    assert excinfo.value.code == 0
+    assert stdout.encoding == "utf-8"
+    stdout.flush()
+    buffer = stdout.buffer
+    assert isinstance(buffer, io.BytesIO)
+    assert buffer.getvalue() == f"log-tracer {__version__}\n".encode()
+
+
+def test_python_dash_m_runs_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    # In-process twin of the subprocess test above, so that coverage sees __main__.
+    called: list[bool] = []
+    monkeypatch.setattr(cli, "main", lambda: called.append(True))
+    runpy.run_module("log_tracer", run_name="__main__")
+    assert called == [True]
+    runpy.run_module("log_tracer.__main__", run_name="log_tracer.__main__")  # imported only
+    assert called == [True]
 
 
 @pytest.mark.skipif(

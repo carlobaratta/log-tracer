@@ -280,6 +280,7 @@ def missing_input_key(key: str) -> dict[str, Any]:
             'rules[0].rule has an unknown value "magic"',
         ),
         (saved(inputs=[1]), "inputs[0] must be an object, got 1"),
+        (saved(config=[]), "config must be an object, got []"),
         (
             saved(top_errors=[{**TOP_ERROR_JSON, "correlation_ids": [7]}]),
             "top_errors[0].correlation_ids[0] must be a string, got 7",
@@ -317,6 +318,7 @@ def test_malformed_document_is_rejected(data: dict[str, Any], message: str) -> N
             "not valid JSON: Expecting property name enclosed in double quotes (line 1, column 2)",
         ),
         ("[]", "the document must be a JSON object, got a list"),
+        ("[" * 100_000, "not valid JSON: nested too deeply"),
         ('{"a": NaN}', "not valid JSON: NaN is not allowed"),
     ],
 )

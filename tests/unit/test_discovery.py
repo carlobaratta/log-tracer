@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from log_tracer.errors import InputError
-from log_tracer.ingestion.discovery import discover
+from log_tracer.ingestion.discovery import discover, discover_files
 from log_tracer.models import InputFormat, SkippedFile, SkipReason
 
 posix_only = pytest.mark.skipif(sys.platform == "win32", reason="needs POSIX symlinks/FIFOs")
@@ -60,6 +60,11 @@ def test_missing_path_is_an_input_error(workdir: Path) -> None:
 def test_no_paths_is_an_input_error() -> None:
     with pytest.raises(InputError, match="no input files given"):
         discover([])
+
+
+def test_no_files_with_known_formats_is_an_input_error() -> None:
+    with pytest.raises(InputError, match="no input files given"):
+        discover_files([])
 
 
 def test_unsupported_extension_is_an_input_error_with_a_hint(workdir: Path) -> None:

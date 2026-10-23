@@ -211,7 +211,7 @@ L'impronta è idempotente: applicarla due volte dà lo stesso risultato. Le stri
 
   Se due sorgenti diverse riportano lo stesso timestamp, l'ordine è *indeterminato* e non conta come precedenza.
 - **COR-5** L'etichetta di un gruppo è il `trace_id` lessicograficamente minore. Se il gruppo non ha trace_id, è il `request_id` minore. Il report elenca comunque tutti gli identificativi del gruppo. I gruppi sono ordinati per etichetta. Se due gruppi hanno la stessa etichetta (un valore usato come trace_id in uno e come request_id nell'altro), viene prima quello con trace_id.
-- **COR-6** Un gruppo con più di 10 000 eventi genera un avviso di qualità dei dati `large_correlation_group` (con `path` nullo), perché potrebbe indicare un identificativo riutilizzato.
+- **COR-6** Un gruppo con più di 10 000 eventi genera un avviso di qualità dei dati `large_correlation_group` (con `path` nullo), perché potrebbe indicare un identificativo riutilizzato. Come gli altri avvisi, finisce in `data_quality.warnings` e la CLI lo stampa su stderr (CLI-2).
 - **COR-7** Non esiste alcuna correlazione per vicinanza temporale o per contenuto del messaggio.
 
 L'ordine tra eventi di servizi diversi riflette i timestamp riportati, che possono essere affetti da sfasamento degli orologi. La CLI lo segnala nell'intestazione di `inspect`.
@@ -467,7 +467,7 @@ Gli errori di contenuto (righe e campi) non interrompono mai l'analisi. Gli erro
 
 - **NFR-1 Offline.** Nessun accesso alla rete. I test lo verificano bloccando i socket.
 - **NFR-2 Determinismo.** A parità di input e configurazione, il risultato è identico tranne `generated_at`, indipendentemente dall'ordine degli argomenti e dall'ordine in cui il filesystem restituisce i file.
-- **NFR-3 Prestazioni (indicative).** 100 000 righe (circa 15 MB) dovrebbero essere analizzate in meno di 10 secondi su un portatile recente, con memoria lineare nel numero di eventi. La misura è documentata in `docs/demo.md` e non è un vincolo della CI.
+- **NFR-3 Prestazioni (indicative).** 100 000 righe (circa 15 MB) dovrebbero essere analizzate in meno di 10 secondi su un portatile recente, con memoria lineare nel numero di eventi. La misura è documentata in `docs/demo.md` e non è un vincolo della CI. Sulla macchina di riferimento 100 000 righe richiedono circa 1,2 s, e tempo e memoria crescono in modo lineare fino a 400 000 righe.
 - **NFR-4 Portabilità.** Python 3.12, 3.13 e 3.14, su Linux, macOS e Windows.
 - **NFR-5 Dipendenze.** A runtime le sole dipendenze sono `typer` e `rich`.
 - **NFR-6 Qualità statica.** `ruff check` e `ruff format --check` non segnalano problemi; `mypy --strict` non segnala errori.
@@ -485,7 +485,7 @@ Gli errori di contenuto (righe e campi) non interrompono mai l'analisi. Gli erro
 | A3 | Normalizza in modo coerente | Test unitari parametrizzati per ING, JL e §2.4 |
 | A4 | Esegue le 4 regole documentate | Test unitari per RUL-1…4, inclusi i casi di skip |
 | A5 | Produce un riepilogo testuale e un JSON valido | Test e2e: `json.loads(stdout)` e confronto con `examples/expected_report.json` |
-| A6 | Gestisce gli input malformati come da §9 | Test e2e per ogni riga della tabella |
+| A6 | Gestisce gli input malformati come da §9 | Test e2e per ogni riga della tabella (`tests/e2e/test_error_table.py`) |
 | A7 | La suite di test è verde | `pytest` in CI su tutta la matrice |
 | A8 | Lint e tipi senza errori | `ruff check`, `ruff format --check`, `mypy --strict` in CI |
 | A9 | CI funzionante | Workflow verde su GitHub |
@@ -524,6 +524,10 @@ Gli errori di contenuto (righe e campi) non interrompono mai l'analisi. Gli erro
 | D-24 | I comandi di `docs/demo.md` sono eseguiti da un test che ne controlla il codice di uscita; gli output nel documento sono estratti mantenuti a mano | La demo non può citare comandi che non funzionano; confrontare gli output legherebbe il test alla resa esatta di Rich. | Snapshot completi dell'output testuale. |
 | D-25 | Il test golden riguarda solo il report JSON di `analyze examples/logs/` | È la fonte da cui derivano riepilogo, `top-errors` e `report`, che hanno già test mirati. | Golden anche per il testo e per i documenti di `top-errors` e `inspect`. |
 | D-26 | `docs/demo.md` è in inglese, come il README | È la pagina pensata per chi valuta il progetto (Q-1); SPEC e ARCHITECTURE restano in italiano. | Demo in italiano. |
+| D-27 | Il generatore di log grandi sta in `tests/large_logs.py`; i valori attesi del test `slow` vengono dalla sua contabilità | Il generatore non fa parte del prodotto; contare ciò che si scrive è indipendente dal codice sotto test. Lo stesso generatore serve alla misura di NFR-3. | Valori attesi calcolati eseguendo l'analisi una volta e salvandoli. |
+| D-28 | I test `slow` girano di default, in locale e in CI; `-m "not slow"` li esclude | Durano pochi secondi, e un test che non gira di default viene dimenticato. | Escluderli di default con `addopts`. |
+| D-29 | Le righe di §9 sono verificate da un unico test e2e parametrizzato, un caso per riga, anche quando sono coperte altrove | A6 diventa verificabile riga per riga; un test confronta i casi con la tabella, così aggiungere una riga senza test fa fallire la suite. | Lasciare la copertura sparsa nei test dei singoli comandi. |
+| D-30 | Le righe scoperte si coprono con test, senza `pragma: no cover`; la soglia resta all'85% | La soglia protegge dalle regressioni (NFR-8); escludere codice dalla misura nasconderebbe proprio le parti difensive. | Escludere `__main__.py` e le guardie difensive dalla copertura. |
 
 ## 13. Questioni aperte
 
