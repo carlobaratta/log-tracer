@@ -28,4 +28,4 @@ The first release: a local, offline command-line tool that analyzes log files wi
 - **Guarantees.** No network access. The same input and configuration always give the same report, apart from `generated_at`. 100 000 lines are analyzed in about 1.2 s on a recent laptop, with memory linear in the number of events.
 - **Examples and documentation.** Bundled example logs, the golden report `examples/expected_report.json`, and a guided demo (`docs/demo.md`) whose commands are run by the test suite.
 
-[0.1.0]: https://github.com/carlobaratta/log-tracer/releases/tag/v0.1.0
+[0.1.0]: https://github.com/carlobaratta/log-tracer/tree/v0.1.0

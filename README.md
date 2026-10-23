@@ -1,5 +1,9 @@
 # Log Tracer
 
+[![CI](https://github.com/carlobaratta/log-tracer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/carlobaratta/log-tracer/actions/workflows/ci.yml)
+![Python 3.12 | 3.13 | 3.14](https://img.shields.io/badge/python-3.12%20%7C%203.13%20%7C%203.14-blue)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 Log Tracer is a local, offline command-line tool for analyzing log files. It reads them, normalizes every line into a common event model, and reports recurring problems with deterministic, documented rules. The same input and configuration always produce the same report. It needs no network access, credentials, or external services.
 
 > **Version 0.1.0.** Log Tracer reads text and JSON Lines logs, from single files or whole directories, correlates events by `request_id` and `trace_id`, shows the timeline of a request, and applies four diagnostic rules, in the terminal or as JSON, with thresholds you can configure. The analysis can be limited to some services or to a time interval, and the last one is saved, so it can be shown again with `report`. A [guided demo](docs/demo.md) runs on the bundled examples, and the [changelog](CHANGELOG.md) lists what this version contains.
@@ -11,13 +15,13 @@ Log Tracer is a local, offline command-line tool for analyzing log files. It rea
 
 ## Installation
 
-Install a released version directly from GitHub:
+Install a tagged version directly from GitHub:
 
 ```bash
 pip install "git+https://github.com/carlobaratta/log-tracer.git@v0.1.0"
 ```
 
-The wheel is also attached to the [GitHub release](https://github.com/carlobaratta/log-tracer/releases/tag/v0.1.0). From a clone of the repository:
+From a clone of the repository:
 
 ```bash
 pip install .
@@ -71,7 +75,7 @@ Top errors
 
 [docs/demo.md](docs/demo.md) walks through every command on the bundled logs, with their output.
 
-Output on stdout is either the summary or a single JSON document, so you can pipe it to other programs; errors, warnings and hints go to stderr. Colors are used only on a terminal, and `NO_COLOR` turns them off. Text taken from the logs is always shown literally: terminal control sequences and bidirectional-override characters are displayed as escapes such as `\x1b`. Log Tracer also warns when at least half of a file's lines cannot be parsed, because this usually means the file uses another format, and when one identifier links more than 10 000 events, which usually means it is reused. The JSON report contains:
+Output on stdout is either the summary or a single JSON document, so you can pipe it to other programs; errors, warnings and hints go to stderr. Colors are used only on a terminal (or when `FORCE_COLOR` is set), and `NO_COLOR` turns them off. Text taken from the logs is always shown literally: terminal control sequences and bidirectional-override characters are displayed as escapes such as `\x1b`. Log Tracer also warns when at least half of a file's lines cannot be parsed, because this usually means the file uses another format, and when one identifier links more than 10 000 events, which usually means it is reused. The JSON report contains:
 
 - the identity of each input (path, size, SHA-256);
 - the configuration and the filters used;

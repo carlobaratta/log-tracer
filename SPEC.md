@@ -331,7 +331,7 @@ I filtri `--service`, `--since` e `--until` definiscono il **perimetro dell'anal
 
 - **CLI-1** Lo stdout contiene solo l'output richiesto. Con `--format json` contiene esattamente un documento JSON valido, terminato da un newline. Stdout e stderr sono sempre in UTF-8, anche quando la localizzazione indica un'altra codifica: su Windows, ad esempio, l'output rediretto userebbe cp1252, che non può rappresentare molti caratteri presenti nei log.
 - **CLI-2** Avvisi, errori e suggerimenti vanno su stderr.
-- **CLI-3** I colori sono usati solo se l'output è un terminale. La variabile `NO_COLOR` è rispettata.
+- **CLI-3** I colori sono usati solo se l'output è un terminale. La variabile `NO_COLOR` è rispettata; `FORCE_COLOR` li attiva anche fuori da un terminale, perché è una richiesta esplicita. Eccezione nota: gli errori d'uso disegnati da Typer (codice 2) sono colorati anche quando sono impostate `GITHUB_ACTIONS` o `PY_COLORS`, che Typer legge all'avvio (ARCHITECTURE §11).
 - **CLI-4** Il contenuto dei log mostrato nel terminale è sempre trattato come testo letterale: markup di Rich (`[bold]`) e codici emoji (`:warning:`) non vengono interpretati. Sono mostrati come escape visibili (ad esempio `\x1b`, `\n`, `\u202e`):
   - i caratteri di controllo (C0, DEL, C1), che potrebbero agire sul terminale;
   - i caratteri che cambiano la direzione del testo (U+061C, U+200E, U+200F, U+202A–U+202E, U+2066–U+2069), che potrebbero far apparire il testo in un ordine diverso da quello reale;
@@ -530,7 +530,7 @@ Gli errori di contenuto (righe e campi) non interrompono mai l'analisi. Gli erro
 | D-30 | Le righe scoperte si coprono con test, senza `pragma: no cover`; la soglia resta all'85% | La soglia protegge dalle regressioni (NFR-8); escludere codice dalla misura nasconderebbe proprio le parti difensive. | Escludere `__main__.py` e le guardie difensive dalla copertura. |
 | D-31 | Licenza MIT, a nome di Carlo Baratta | È la licenza più semplice e diffusa per un progetto di portfolio, e permette a chiunque di riusare il codice. | Nessuna licenza: il codice resterebbe non riutilizzabile; Apache-2.0: più articolata, senza vantaggi a questa scala. |
 | D-32 | Versionamento SemVer, `CHANGELOG.md` nel formato Keep a Changelog, tag annotato `v0.1.0` creato solo sul commit con la CI verde | Il tag è la promessa che i criteri di §11 sono verificati; il CHANGELOG dice cosa contiene la versione senza leggere la cronologia. | Tag creato prima della CI, o note di rilascio solo su GitHub. |
-| D-33 | Nessuna pubblicazione su PyPI per la v0.1.0: si installa dal tag su GitHub o dalla wheel allegata alla release | PyPI richiede un account e credenziali, e il nome potrebbe essere già occupato; per un portfolio basta un'installazione riproducibile. | Pubblicare su PyPI o su TestPyPI. |
+| D-33 | Nessuna pubblicazione su PyPI per la v0.1.0: si installa dal tag su GitHub; la GitHub Release, con la wheel allegata, segue in un secondo momento | PyPI richiede un account e credenziali, e il nome potrebbe essere già occupato; per un portfolio basta un'installazione riproducibile. | Pubblicare su PyPI o su TestPyPI. |
 | D-34 | Q-1 è chiusa da D-26; Q-2 e Q-3 diventano evoluzioni in ARCHITECTURE §11 | Le tre questioni non bloccano la v0.1.0. | Lasciarle aperte. |
 
 ## 13. Questioni aperte

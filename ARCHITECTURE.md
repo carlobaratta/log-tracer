@@ -444,7 +444,7 @@ Due casi limite della libreria standard sono stati verificati su Python 3.12 e 3
 
 ```
 tests/
-├── conftest.py          # profili di Hypothesis, blocco della rete (NFR-1)
+├── conftest.py          # profili di Hypothesis, blocco della rete (NFR-1), niente FORCE_COLOR
 ├── factories.py         # make_event(), make_report(), T0: costruttori dei modelli
 ├── large_logs.py        # generatore deterministico di log grandi (D-27)
 ├── unit/
@@ -546,4 +546,5 @@ Tutti gli incrementi sono completati. Il rilascio `v0.1.0` è il tag annotato de
 | `top-errors` esegue l'intera pipeline | Lavoro superfluo, trascurabile alle dimensioni della v0.1 | Pipeline selettiva per regole |
 | Formato testuale unico | Altri formati richiedono una conversione preliminare | Un modulo `*_format.py` per ogni nuovo formato, senza modificare il resto |
 | Nessun evento multi-riga nel testo (ex Q-2) | Ogni riga di uno stack trace dopo la prima è conteggiata come non interpretabile | Nella v0.2, considerare continuazione le righe che iniziano con spazio o tabulazione |
+| Errori d'uso disegnati da Typer | Con `GITHUB_ACTIONS`, `FORCE_COLOR` o `PY_COLORS` il box degli errori d'uso (codice 2) è colorato anche fuori da un terminale, un'eccezione a CLI-3; i messaggi di Log Tracer non cambiano | Disattivare i colori di Typer quando stdout non è un terminale, se Typer espone un'opzione pubblica per farlo |
 | Solo testo e JSON come output (ex Q-3) | Nessun report da condividere con chi non usa il terminale | Un report HTML generato dal JSON, senza cambiare l'analisi |
