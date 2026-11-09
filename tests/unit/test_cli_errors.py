@@ -14,6 +14,14 @@ def test_typer_exit_passes_through_unchanged() -> None:
     assert excinfo.value.exit_code == 5
 
 
+def test_closed_output_pipe_is_not_reported_as_a_bug(capsys: pytest.CaptureFixture[str]) -> None:
+    # `log-tracer ... | head` closes stdout early: the reader went away, which
+    # is not an internal error (code 70) and is left to Python, as before.
+    with pytest.raises(BrokenPipeError), _exit_on_error():
+        raise BrokenPipeError
+    assert capsys.readouterr().err == ""
+
+
 def test_input_error_becomes_exit_code_3(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(typer.Exit) as excinfo, _exit_on_error():
         raise InputError("path not found: x.log", hint="check the path")

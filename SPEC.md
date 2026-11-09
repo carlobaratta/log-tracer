@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| Stato | Approvata per la v0.1.0 |
+| Stato | In vigore per la v0.1.0, rilasciata il 2026-10-23 |
 | Versione software di riferimento | 0.1.0 |
-| Ultimo aggiornamento | 2026-10-23 |
+| Ultimo aggiornamento | 2026-11-09 |
 
 Questo documento descrive **cosa** fa Log Tracer v0.1.0 e come si comporta nei casi limite.
 Il **come** (moduli, dipendenze, modello dei dati, test, CI) è descritto in [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -184,6 +184,8 @@ Un evento è un *errore* se il suo livello è `ERROR` o `CRITICAL`. `UNKNOWN` no
 
 **Servizio.** Gli spazi esterni sono rimossi. Una stringa vuota equivale a un servizio assente.
 
+**Durate.** `duration_ms` è un numero di millisecondi finito e ≥ 0. Come stringa, in entrambi i formati, è un numero decimale senza segno ed esponente (`2500`, `12.5`). Un valore troppo grande per essere rappresentato, ad esempio 400 cifre, non è finito: come ogni valore non accettato rende assente il campo e registra `duration_ms.invalid`.
+
 ### 2.5 Impronta dei messaggi
 
 Gli errori simili si raggruppano tramite un'impronta del messaggio. Le sostituzioni sono applicate in quest'ordine:
@@ -294,7 +296,7 @@ Gli stessi gruppi alimentano anche la sezione `top_errors` del report (i primi `
 | Evidenze | `window_s`, `start`, `end`, `windows` (finestre unite), `errors`, `peak_window_errors`, `baseline`, `threshold`, `excluded_without_timestamp` |
 | Eventi | Gli errori delle finestre del picco, in ordine di timeline; `correlation_ids` sono le loro sequenze. L'id del finding dipende dall'inizio del picco. |
 | Skip | `insufficient_data` se l'intervallo copre meno di 3 finestre. |
-| Limiti noti | Una finestra fissa può spezzare un picco a cavallo di due finestre. Gli errori senza timestamp sono esclusi e conteggiati nelle evidenze. |
+| Limiti noti | Una finestra fissa può spezzare un picco a cavallo di due finestre. Gli errori senza timestamp sono esclusi e conteggiati nelle evidenze. Ai confini delle date rappresentabili, `start` ed `end` sono limitati a `0001-01-01T00:00:00.000000Z` e a `9999-12-31T23:59:59.999999Z`: la fine dell'ultima finestra del 9999 sarebbe il 10000-01-01. |
 
 ---
 
@@ -388,8 +390,7 @@ I filtri `--service`, `--since` e `--until` definiscono il **perimetro dell'anal
   - le soglie in millisecondi sono numeri positivi e finiti;
   - i booleani non valgono come numeri;
   - `critical_ms` deve essere maggiore di `warn_ms`, anche per ogni servizio dopo aver ereditato i valori globali;
-  - `recurring_error.high_count` deve essere maggiore o uguale a `min_occurrences`.
-
+  - `recurring_error.high_count` deve essere maggiore o uguale a `min_occurrences`;
   - `error_spike.window_s` è un intero di secondi, e `error_spike.factor` deve essere almeno 1: un fattore minore porterebbe la soglia sotto il livello normale.
 - **CFG-3** La precedenza è: valori di default, poi file di configurazione, poi opzioni della CLI che corrispondono a una chiave (oggi solo `top-errors --limit`, che prevale su `report.top_errors`). Le soglie di un servizio ereditano da `high_latency` quelle che non specificano. I filtri CLI non sono configurazione e sono registrati a parte nel report.
 - **CFG-4** Un file mancante o illeggibile, non UTF-8 o con sintassi TOML non valida (il messaggio riporta riga e colonna) è un errore di configurazione (codice 2). La configurazione viene controllata prima di leggere i log, così un errore non fa sprecare un'analisi lunga.
@@ -486,9 +487,9 @@ Gli errori di contenuto (righe e campi) non interrompono mai l'analisi. Gli erro
 | A4 | Esegue le 4 regole documentate | Test unitari per RUL-1…4, inclusi i casi di skip | Soddisfatto: `test_rule_*.py`, e `test_large_input.py` su 100 000 righe |
 | A5 | Produce un riepilogo testuale e un JSON valido | Test e2e: `json.loads(stdout)` e confronto con `examples/expected_report.json` | Soddisfatto: `tests/e2e/test_golden.py` |
 | A6 | Gestisce gli input malformati come da §9 | Test e2e per ogni riga della tabella (`tests/e2e/test_error_table.py`) | Soddisfatto: un caso per riga, confrontato con la tabella |
-| A7 | La suite di test è verde | `pytest` in CI su tutta la matrice | Condizione del rilascio: il tag si crea solo con il workflow verde |
-| A8 | Lint e tipi senza errori | `ruff check`, `ruff format --check`, `mypy --strict` in CI | Condizione del rilascio, come A7 |
-| A9 | CI funzionante | Workflow verde su GitHub | Condizione del rilascio, come A7 |
+| A7 | La suite di test è verde | `pytest` in CI su tutta la matrice | Soddisfatto: workflow verde sul commit del tag `v0.1.0` (D-32) |
+| A8 | Lint e tipi senza errori | `ruff check`, `ruff format --check`, `mypy --strict` in CI | Soddisfatto: job `quality` dello stesso workflow |
+| A9 | CI funzionante | Workflow verde su GitHub | Soddisfatto: tutti i job verdi sul commit del tag `v0.1.0` |
 | A10 | Demo riproducibile | `docs/demo.md` con comandi eseguibili su `examples/` | Soddisfatto: `tests/e2e/test_demo.py` esegue ogni comando |
 | A11 | Nessuna dipendenza remota | NFR-1 e nessuna credenziale richiesta | Soddisfatto: socket bloccati in ogni test (`tests/conftest.py`) |
 
@@ -519,7 +520,7 @@ Gli errori di contenuto (righe e campi) non interrompono mai l'analisi. Gli erro
 | D-19 | `summary.events` conta gli eventi nel perimetro, `inputs[].events` quelli letti; un servizio di `--service` assente da tutti gli eventi letti produce un avviso | Il riepilogo descrive ciò che le regole hanno visto, gli input descrivono i file; un nome sbagliato non deve dare in silenzio un'analisi vuota. Un servizio presente ma fuori dall'intervallo temporale non è un errore e non genera avvisi. | Nessun avviso: un errore di battitura sembrerebbe un sistema senza problemi. |
 | D-20 | `--since` e `--until` accettano i timestamp dei log e anche una data sola (mezzanotte UTC) | Lo stesso formato dei log evita sorprese; la data sola è il caso d'uso più comune. | Accettare espressioni relative (`1h`, `yesterday`): dipendono dall'orologio e rendono il report non riproducibile. |
 | D-21 | Anche il documento di `top-errors` include `filters` | Senza, un elenco di errori filtrato sembrerebbe quello completo. | Lasciare REP-5 invariato. |
-| D-22 | Lo schema resta `1.0` anche con la chiave `filters` | La v0.1.0 non è ancora stata rilasciata, quindi non esistono consumatori da proteggere; un report salvato prima dell'aggiunta viene rifiutato (`missing key 'filters'`) con il suggerimento di rieseguire `analyze`. | Passare a `1.1` e trattare `filters` come facoltativo. |
+| D-22 | Lo schema resta `1.0` anche con la chiave `filters` | Decisa prima del rilascio, quando la v0.1.0 non aveva ancora consumatori da proteggere; un report salvato prima dell'aggiunta viene rifiutato (`missing key 'filters'`) con il suggerimento di rieseguire `analyze`. | Passare a `1.1` e trattare `filters` come facoltativo. |
 | D-23 | Gli esempi includono `batch.log`, una raffica di errori di un job notturno | La demo mostra tutte e quattro le regole e un finding `high` con la configurazione di default, senza cambiare gli altri due file, che restano la base dei test esistenti. | Modificare `sample.log`: cambierebbe la timeline di `req-184` e i test che la verificano. |
 | D-24 | I comandi di `docs/demo.md` sono eseguiti da un test che ne controlla il codice di uscita; gli output nel documento sono estratti mantenuti a mano | La demo non può citare comandi che non funzionano; confrontare gli output legherebbe il test alla resa esatta di Rich. | Snapshot completi dell'output testuale. |
 | D-25 | Il test golden riguarda solo il report JSON di `analyze examples/logs/` | È la fonte da cui derivano riepilogo, `top-errors` e `report`, che hanno già test mirati. | Golden anche per il testo e per i documenti di `top-errors` e `inspect`. |
@@ -530,7 +531,7 @@ Gli errori di contenuto (righe e campi) non interrompono mai l'analisi. Gli erro
 | D-30 | Le righe scoperte si coprono con test, senza `pragma: no cover`; la soglia resta all'85% | La soglia protegge dalle regressioni (NFR-8); escludere codice dalla misura nasconderebbe proprio le parti difensive. | Escludere `__main__.py` e le guardie difensive dalla copertura. |
 | D-31 | Licenza MIT, a nome di Carlo Baratta | È la licenza più semplice e diffusa per un progetto di portfolio, e permette a chiunque di riusare il codice. | Nessuna licenza: il codice resterebbe non riutilizzabile; Apache-2.0: più articolata, senza vantaggi a questa scala. |
 | D-32 | Versionamento SemVer, `CHANGELOG.md` nel formato Keep a Changelog, tag annotato `v0.1.0` creato solo sul commit con la CI verde | Il tag è la promessa che i criteri di §11 sono verificati; il CHANGELOG dice cosa contiene la versione senza leggere la cronologia. | Tag creato prima della CI, o note di rilascio solo su GitHub. |
-| D-33 | Nessuna pubblicazione su PyPI per la v0.1.0: si installa dal tag su GitHub; la GitHub Release, con la wheel allegata, segue in un secondo momento | PyPI richiede un account e credenziali, e il nome potrebbe essere già occupato; per un portfolio basta un'installazione riproducibile. | Pubblicare su PyPI o su TestPyPI. |
+| D-33 | Nessuna pubblicazione su PyPI per la v0.1.0: si installa dal tag su GitHub, oppure dalla wheel allegata alla GitHub Release `v0.1.0` (pubblicata dopo il tag, con wheel, sdist e i loro SHA-256) | PyPI richiede un account e credenziali, e il nome potrebbe essere già occupato; per un portfolio basta un'installazione riproducibile. | Pubblicare su PyPI o su TestPyPI. |
 | D-34 | Q-1 è chiusa da D-26; Q-2 e Q-3 diventano evoluzioni in ARCHITECTURE §11 | Le tre questioni non bloccano la v0.1.0. | Lasciarle aperte. |
 
 ## 13. Questioni aperte

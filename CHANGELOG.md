@@ -2,6 +2,14 @@
 
 All notable changes to Log Tracer are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- A `duration_ms` written as a string of hundreds of digits, in a text or a JSON Lines log, no longer stops `analyze` with a traceback: it is too large to be represented, so it is now counted as `duration_ms.invalid`, like any other invalid duration.
+- `error_spike` no longer stops the analysis with an internal error when a spike falls in the first moments of year 1 or the last minute of year 9999: the bounds of its windows are limited to the dates that can be represented. Spike titles now write years before 1000 with four digits on every platform.
+- An unexpected error while printing or serializing the output of `analyze`, `report`, `top-errors` or `inspect` now exits with code 70, as documented, instead of 1, which is the code of `--fail-on`.
+
 ## [0.1.0] - 2026-10-23
 
 The first release: a local, offline command-line tool that analyzes log files with deterministic, documented rules. The behavior is specified in [SPEC.md](SPEC.md) and the design in [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -28,4 +36,5 @@ The first release: a local, offline command-line tool that analyzes log files wi
 - **Guarantees.** No network access. The same input and configuration always give the same report, apart from `generated_at`. 100 000 lines are analyzed in about 1.2 s on a recent laptop, with memory linear in the number of events.
 - **Examples and documentation.** Bundled example logs, the golden report `examples/expected_report.json`, and a guided demo (`docs/demo.md`) whose commands are run by the test suite.
 
-[0.1.0]: https://github.com/carlobaratta/log-tracer/tree/v0.1.0
+[Unreleased]: https://github.com/carlobaratta/log-tracer/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/carlobaratta/log-tracer/releases/tag/v0.1.0

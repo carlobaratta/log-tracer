@@ -162,7 +162,12 @@ def test_valid_durations_are_parsed(raw: str, expected: float) -> None:
 
 @pytest.mark.parametrize(
     "raw",
-    ["", "-1", "abc", "12ms", "1e3", "nan", "inf", "1_000", " 12", "12.", ".5", "\uff11\uff12"],
+    [
+        *("", "-1", "abc", "12ms", "1e3", "nan", "inf", "1_000", " 12", "12.", ".5"),
+        "\uff11\uff12",
+        # float() turns 400 digits into infinity without raising (§2.4: finite).
+        pytest.param("9" * 400, id="400-digits"),
+    ],
 )
 def test_invalid_durations_return_none(raw: str) -> None:
     assert parse_duration_ms(raw) is None

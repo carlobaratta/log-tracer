@@ -21,6 +21,14 @@ Install a tagged version directly from GitHub:
 pip install "git+https://github.com/carlobaratta/log-tracer.git@v0.1.0"
 ```
 
+Or download the wheel attached to the [v0.1.0 release](https://github.com/carlobaratta/log-tracer/releases/tag/v0.1.0), check it against the SHA-256 checksum in the release notes, and install it:
+
+```bash
+pip install log_tracer-0.1.0-py3-none-any.whl
+```
+
+Log Tracer is not published on PyPI.
+
 From a clone of the repository:
 
 ```bash

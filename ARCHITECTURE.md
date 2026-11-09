@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| Stato | Approvata per la v0.1.0 |
+| Stato | In vigore per la v0.1.0, rilasciata il 2026-10-23 |
 | Versione software di riferimento | 0.1.0 |
-| Ultimo aggiornamento | 2026-10-23 |
+| Ultimo aggiornamento | 2026-11-09 |
 
 Questo documento descrive **come** è costruito Log Tracer: moduli, dipendenze, modello dei dati, gestione degli errori, test e CI.
 I requisiti a cui si fa riferimento (`ING-3`, `RUL-2`, …) sono definiti in [SPEC.md](SPEC.md).
@@ -38,21 +38,32 @@ I tre principi strutturali sono questi:
 
 ---
 
-## 2. Struttura del repository (obiettivo v0.1.0)
+## 2. Struttura del repository (v0.1.0)
 
-I moduli vengono introdotti progressivamente, solo quando servono. La colonna "Incremento" indica quando compare ciascun file (vedi §10).
+I moduli sono stati introdotti progressivamente, solo quando servivano: §10 indica in quale incremento compare ciascuno.
 
 ```
 log-tracer/
 ├── pyproject.toml              # metadati, dipendenze, configurazione di ruff, mypy, pytest e coverage
 ├── uv.lock                     # lockfile per CI riproducibile
+├── .python-version             # 3.12, la versione minima, per uv
 ├── README.md
 ├── SPEC.md
 ├── ARCHITECTURE.md
-├── .github/workflows/ci.yml
+├── CHANGELOG.md                # Keep a Changelog (D-32)
+├── LICENSE                     # MIT (D-31)
+├── CONTRIBUTING.md             # come si propone una modifica: SPEC → test → codice
+├── SECURITY.md                 # segnalazione privata delle vulnerabilità
+├── CODE_OF_CONDUCT.md          # Contributor Covenant 2.1
+├── .github/
+│   ├── workflows/ci.yml        # vedi §9.2
+│   ├── dependabot.yml          # aggiornamenti settimanali di action e uv.lock
+│   ├── ISSUE_TEMPLATE/         # moduli per bug e richieste di funzionalità
+│   └── pull_request_template.md
 ├── src/log_tracer/
 │   ├── __init__.py             # __version__
 │   ├── __main__.py             # python -m log_tracer
+│   ├── py.typed                # PEP 561: il pacchetto espone i propri tipi
 │   ├── cli.py                  # Typer: argomenti → pipeline → rendering → codice di uscita
 │   ├── errors.py               # gerarchia di eccezioni d'ambiente
 │   ├── models.py               # dataclass ed enum puri, senza logica
@@ -68,6 +79,7 @@ log-tracer/
 │   │   └── jsonl_format.py     # parse_jsonl_line
 │   ├── analysis/
 │   │   ├── __init__.py         # analyze(events, config) -> AnalysisResult
+│   │   ├── context.py          # AnalysisContext condiviso dalle regole, finding_id()
 │   │   ├── fingerprint.py      # impronta dei messaggi
 │   │   ├── correlation.py      # gruppi (union-find), ordine di timeline, precedes()
 │   │   ├── statistics.py       # distribuzione dei livelli, gruppi di errori
@@ -106,7 +118,7 @@ Rispetto alla struttura suggerita dalla specifica iniziale ci sono quattro diffe
 |---|---|---|
 | `models` | Definire i tipi del dominio (eventi, risultati, report) | Contenere logica di parsing, analisi o formattazione |
 | `config` | Valori di default, caricamento TOML (`tomllib`), validazione → `ConfigError`. `parse_config()` valida dati già letti e si può testare senza file; `load_config()` aggiunge solo la lettura | Leggere opzioni della CLI o variabili d'ambiente |
-| `errors` | `LogTracerError` → `InputError`, `ConfigError`, `StateError` | Conoscere i codici di uscita |
+| `errors` | `LogTracerError` → `InputError`, `OutputError`, `NotFoundError`, `ConfigError`, `StateError` | Conoscere i codici di uscita |
 | `ingestion.discovery` | Espandere i percorsi, dedurre il formato, ordinare, deduplicare (ING-1…3) | Leggere il contenuto dei file |
 | `ingestion.reader` | Produrre righe `(numero, testo)`, gestire la codifica (ING-4) e calcolare sha256 e dimensione in un'unica lettura | Interpretare le righe |
 | `ingestion.fields` | Convertire valori grezzi in valori normalizzati e problemi di campo (§2.4 della SPEC) | Conoscere il formato di origine |
@@ -231,9 +243,6 @@ class UnparsedReason(StrEnum):
     INVALID_JSON = "invalid_json"
     NOT_AN_OBJECT = "not_an_object"
     NO_KNOWN_FIELDS = "no_known_fields"
-    INVALID_JSON = "invalid_json"
-    NOT_AN_OBJECT = "not_an_object"
-    NO_KNOWN_FIELDS = "no_known_fields"
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,8 +265,8 @@ LineOutcome = ParsedEvent | UnparsedLine  # risultato dei parser: totale, nessun
 class SourceSummary:
     path: str
     format: InputFormat
-    size_bytes: int
-    sha256: str
+    size_bytes: int | None  # None se il file non è leggibile
+    sha256: str | None
     lines: int
     blank_lines: int
     events: int
@@ -273,7 +282,7 @@ class SkippedFile:  # file trovato in una directory e non analizzato (ING-1)
 
 @dataclass(frozen=True, slots=True)
 class DataWarning:  # stampato su stderr dalla CLI (ING-7, ING-9, COR-6)
-    code: WarningCode  # unreadable_file, mostly_unparsed, large_correlation_group
+    code: WarningCode  # unreadable_file, mostly_unparsed, large_correlation_group, unmatched_service_filter
     path: str | None  # None per i problemi trovati dall'analisi
     message: str
 
@@ -333,7 +342,7 @@ class ErrorGroup:  # alimenta top_errors e RUL-1
     correlation_ids: tuple[str, ...]  # le loro etichette, per prima occorrenza (campione)
 
 
-EvidenceValue = str | int | float | bool | None
+EvidenceValue = str | int | float | bool | datetime | None  # datetime: scritto in RFC 3339
 
 
 @dataclass(frozen=True, slots=True)
@@ -360,7 +369,7 @@ class RuleOutcome:
 @dataclass(frozen=True, slots=True)
 class AnalysisResult:
     level_counts: Mapping[Level, int]
-    time_range: tuple[datetime, datetime] | None
+    time_range: TimeRange | None  # start ed end, timezone-aware
     correlation_groups: int
     uncorrelated_events: int
     top_errors: tuple[ErrorGroup, ...]
@@ -381,13 +390,13 @@ class Report:
 
 Il `Report` non contiene gli eventi (REP-2): `IngestionResult` è composto da `events` e da un `IngestionSummary` (sorgenti, conteggi, campioni), e nel report finisce solo quest'ultimo. `schema_version` non è un campo del modello: appartiene alla codifica JSON e la scrive `reporting.json_report`.
 
-**Correlazione (`analysis.correlation`).** `correlate()` costruisce un *union-find* sui nodi `("request", id)` e `("trace", id)`: due nodi sono uniti quando compaiono nello stesso evento, e ogni componente connessa è una sequenza (COR-1). Lo spazio di nomi nel nodo tiene separati un request_id e un trace_id con lo stesso valore. Il costo è quasi lineare grazie all'unione per dimensione e alla compressione dei cammini. La partizione non dipende dall'ordine degli eventi: un test di proprietà la confronta con una visita in ampiezza scritta in modo indipendente nel test. `inspect` usa lo stesso risultato tramite `pipeline.run_inspect()`, che produce un `Inspection` (identificativo cercato, sequenze trovate, riepilogo degli input) senza eseguire le regole.
+**Correlazione (`analysis.correlation`).** `correlate()` costruisce un *union-find* sui nodi `("request", id)` e `("trace", id)`: due nodi sono uniti quando compaiono nello stesso evento, e ogni componente connessa è una sequenza (COR-1). Lo spazio di nomi nel nodo tiene separati un request_id e un trace_id con lo stesso valore. Il costo è quasi lineare grazie all'unione per dimensione e al dimezzamento dei cammini (*path halving*). La partizione non dipende dall'ordine degli eventi: un test di proprietà la confronta con una visita in ampiezza scritta in modo indipendente nel test. `inspect` usa lo stesso risultato tramite `pipeline.run_inspect()`, che produce un `Inspection` (identificativo cercato, sequenze trovate, riepilogo degli input) senza eseguire le regole.
 
 **Stato (`state`).** `save()` scrive il report con `json_report.dumps` in un file temporaneo della stessa directory, poi lo rinomina su `last-report.json`: chi legge vede il report precedente o quello nuovo, mai uno scritto a metà (STA-1). `load()` legge il file e lo decodifica con `json_report.loads`, che ricostruisce il `Report` e solleva `ReportDecodeError` con il percorso del valore errato (ad esempio `inputs[0].sha256`); `state` la traduce in `StateError`. Senza PATH, `inspect` passa per `pipeline.run_inspect_saved()`, che rilegge le sorgenti salvate con il loro formato tramite `ingestion.ingest_files()` (D-16), e `pipeline.changed_sources()` confronta gli sha256 per l'avviso di STA-3.
 
 **Filtri (`pipeline.filter_events`).** Tra ingestion e analysis, `filter_events()` tiene gli eventi del perimetro (D-9) e restituisce un `FilterSummary` con i criteri normalizzati (servizi ordinati e senza duplicati, per NFR-2), il numero di eventi esclusi e gli avvisi `unmatched_service_filter`. Le regole ricevono solo gli eventi filtrati e non sanno che esistono filtri. Nel report gli avvisi compaiono nell'ordine degli stadi: ingestion, filtri, analisi. La CLI converte e valida le opzioni con `ingestion.fields.parse_time_bound()` prima di leggere i log.
 
-**Identificativo di un finding.** È l'hash SHA-256 di una chiave canonica, specifica di ogni regola (ad esempio `servizio + "\x1f" + impronta` per RUL-1). È stabile tra esecuzioni e permette di confrontare due report. Non si usa `hash()`, che in Python cambia da un'esecuzione all'altra.
+**Identificativo di un finding.** È `<regola>:` seguito dai primi 12 caratteri esadecimali dell'hash SHA-256 di una chiave canonica, specifica di ogni regola. `analysis.context.finding_id()` codifica la chiave come array JSON compatto (ad esempio `["recurring_error", servizio, impronta]` per RUL-1), così `null` e `""` restano distinti e nessun separatore si confonde con il contenuto. È stabile tra esecuzioni e permette di confrontare due report. Non si usa `hash()`, che in Python cambia da un'esecuzione all'altra.
 
 ---
 
@@ -402,9 +411,9 @@ Il `Report` non contiene gli eventi (REP-2): `IngestionResult` è composto da `e
 | Configurazione | `ConfigError`, con il nome della chiave | `cli` → codice 2 |
 | Stato salvato mancante o incompatibile | `StateError` | `cli` → codice 3 |
 | Identificativo non presente nei log (`inspect`) | `NotFoundError` | `cli` → codice 4 |
-| Bug | Qualunque altra eccezione | Unica guardia in `cli.main()`: messaggio e traceback su stderr, codice 70 |
+| Bug | Qualunque altra eccezione | Guardia finale di `cli._exit_on_error()`: messaggio e traceback su stderr, codice 70 |
 
-Il codice non contiene mai `except Exception` fuori dalla guardia finale della CLI. La traduzione da eccezione a codice di uscita avviene in un solo punto (`cli.py`), quindi la tabella della SPEC §5.4 corrisponde a un unico `match`.
+La traduzione da eccezione a codice di uscita avviene in un solo punto: il context manager `_exit_on_error()` di `cli.py`, che avvolge le chiamate a configurazione, pipeline e stato e la produzione dell'output (serializzazione e rendering), così anche un bug nell'ultimo passo esce con 70 e non con l'1 di `--fail-on`. Fa eccezione `BrokenPipeError`: quando chi legge stdout si chiude prima della fine (`| head`) non c'è un bug, e l'eccezione è lasciata a Python, che esce con codice 1. Le sue clausole `except` corrispondono ai codici 2, 3, 4 e 70 della tabella della SPEC §5.4 (gli altri errori d'uso li segnala Typer, sempre con codice 2), e l'ultima è l'unico `except Exception` del codice.
 
 Due casi limite della libreria standard sono stati verificati su Python 3.12 e 3.14 e vanno gestiti esplicitamente:
 
@@ -514,6 +523,8 @@ Dipendenze:
 
 Il workflow si avvia su `push` verso `main` e su `pull_request`, con `permissions: contents: read`, `concurrency` per annullare le esecuzioni superate e un `timeout-minutes` su ogni job. Le action sono fissate alla versione maggiore.
 
+Dependabot (`.github/dependabot.yml`) propone ogni settimana pull request raggruppate: una per le action e, per `uv.lock`, una per le dipendenze di sviluppo e una per quelle di runtime. Siccome la CI esegue `uv sync --locked`, ogni aggiornamento passa dall'intera matrice prima di poter essere unito.
+
 ---
 
 ## 10. Piano incrementale
@@ -531,7 +542,7 @@ Il workflow si avvia su `push` verso `main` e su `pull_request`, con `permission
 | 9 | Consolidamento: grandi input, revisione dei casi limite, revisione della copertura | — |
 | 10 | Margine, rifinitura, rilascio `v0.1.0` | — |
 
-Tutti gli incrementi sono completati. Il rilascio `v0.1.0` è il tag annotato del commit su cui il workflow di CI è verde (D-32).
+Tutti gli incrementi sono completati. Il rilascio `v0.1.0` è il tag annotato del commit su cui il workflow di CI è verde (D-32), pubblicato il 2026-10-23 anche come GitHub Release con la wheel e la sdist costruite da quel tag (D-33).
 
 ---
 
@@ -547,4 +558,5 @@ Tutti gli incrementi sono completati. Il rilascio `v0.1.0` è il tag annotato de
 | Formato testuale unico | Altri formati richiedono una conversione preliminare | Un modulo `*_format.py` per ogni nuovo formato, senza modificare il resto |
 | Nessun evento multi-riga nel testo (ex Q-2) | Ogni riga di uno stack trace dopo la prima è conteggiata come non interpretabile | Nella v0.2, considerare continuazione le righe che iniziano con spazio o tabulazione |
 | Errori d'uso disegnati da Typer | Con `GITHUB_ACTIONS`, `FORCE_COLOR` o `PY_COLORS` il box degli errori d'uso (codice 2) è colorato anche fuori da un terminale, un'eccezione a CLI-3; i messaggi di Log Tracer non cambiano | Disattivare i colori di Typer quando stdout non è un terminale, se Typer espone un'opzione pubblica per farlo |
+| Stdout chiuso da chi legge (`\| head`) | Python esce con codice 1, lo stesso di `--fail-on`, senza messaggi su stderr | Uscire in silenzio con un codice dedicato (ad esempio 141, cioè 128 + SIGPIPE), da aggiungere a SPEC §5.4 |
 | Solo testo e JSON come output (ex Q-3) | Nessun report da condividere con chi non usa il terminale | Un report HTML generato dal JSON, senza cambiare l'analisi |

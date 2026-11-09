@@ -217,6 +217,39 @@ def test_finding_id_depends_on_the_start_of_the_spike() -> None:
     assert first.startswith("error_spike:")
 
 
+# --- Limits of the date range --------------------------------------------------------------------
+
+UTC_MIN = datetime.min.replace(tzinfo=UTC)
+UTC_MAX = datetime.max.replace(tzinfo=UTC)
+
+
+def test_spike_in_the_last_window_of_year_9999_ends_at_the_largest_date() -> None:
+    # RUL-4, NFR-7: the end of the last window, 10000-01-01, cannot be represented.
+    log = Log()
+    log.event(Level.INFO, UTC_MAX - timedelta(minutes=2))
+    for second in range(6):
+        log.event(Level.ERROR, UTC_MAX - timedelta(seconds=second))
+    (finding,) = run(log.events).findings
+    assert finding.evidence["start"] == datetime(9999, 12, 31, 23, 59, tzinfo=UTC)
+    assert finding.evidence["end"] == UTC_MAX
+    assert finding.title == "Error spike from 9999-12-31T23:59:00Z: 6 errors in 60 s"
+
+
+def test_spike_in_the_first_window_of_year_1_starts_at_the_smallest_date() -> None:
+    # RUL-4, NFR-7: with 7-second windows aligned to the epoch, the window that
+    # contains 0001-01-01T00:00:00 starts 3 seconds before it.
+    config = ErrorSpikeConfig(window_s=7, factor=3.0, min_errors=5)
+    log = Log()
+    for index in range(6):
+        log.event(Level.ERROR, UTC_MIN + timedelta(milliseconds=500 * index))
+    log.event(Level.INFO, UTC_MIN + timedelta(seconds=20))
+    (finding,) = run(log.events, config).findings
+    assert finding.evidence["start"] == UTC_MIN
+    assert finding.evidence["end"] == UTC_MIN + timedelta(seconds=4)
+    # Four-digit years on every platform: strftime("%Y") writes "1" on Linux.
+    assert finding.title == "Error spike from 0001-01-01T00:00:00Z: 6 errors in 7 s"
+
+
 # --- Median of windows ---------------------------------------------------------------------------
 
 

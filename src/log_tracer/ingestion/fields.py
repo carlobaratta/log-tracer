@@ -114,14 +114,17 @@ def normalize_service(raw: str) -> str | None:
 
 
 def parse_duration_ms(raw: str) -> float | None:
-    """Parse a non-negative decimal number of milliseconds.
+    """Parse a non-negative, finite decimal number of milliseconds.
 
-    A strict pattern is used instead of ``float()``, which would also accept
-    ``nan``, ``inf``, exponents, underscores and surrounding whitespace.
+    A strict pattern is used instead of ``float()`` alone, which would also
+    accept ``nan``, ``inf``, exponents, underscores and surrounding whitespace.
+    The pattern cannot exclude a number too large for a float: ``float()``
+    turns it into infinity without raising, so the result is checked too.
     """
     if _DURATION_RE.fullmatch(raw) is None:
         return None
-    return float(raw)
+    duration = float(raw)
+    return duration if math.isfinite(duration) else None
 
 
 def normalize_duration_number(value: int | float) -> float | None:

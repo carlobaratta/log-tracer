@@ -222,7 +222,9 @@ def test_sentinel_identifiers_are_absent() -> None:
     assert issues == ()
 
 
-@pytest.mark.parametrize("value", ["abc", "-5", "1e3", "nan"])
+@pytest.mark.parametrize(
+    "value", ["abc", "-5", "1e3", "nan", pytest.param("9" * 400, id="400-digits")]
+)
 def test_invalid_duration_is_dropped_and_reported(value: str) -> None:
     event, issues = parse_event(f"2026-10-16T14:03:22Z INFO [api] done duration_ms={value}")
     assert event.duration_ms is None

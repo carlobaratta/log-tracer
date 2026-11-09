@@ -301,7 +301,14 @@ def test_valid_durations(value: object, expected: float) -> None:
     assert (event.duration_ms, issues) == (expected, ())
 
 
-@pytest.mark.parametrize("value", [-1, -0.5, True, "abc", "1e3", "-5", [1], {"ms": 1}])
+@pytest.mark.parametrize(
+    "value",
+    [
+        *(-1, -0.5, True, "abc", "1e3", "-5", [1], {"ms": 1}),
+        # A numeric string that float() turns into infinity (JL-3: finite).
+        pytest.param("9" * 400, id="400-digit-string"),
+    ],
+)
 def test_invalid_durations(value: object) -> None:
     event, issues = parse_obj({**BASE, "duration_ms": value})
     assert (event.duration_ms, issues) == (None, (IssueCode.DURATION_INVALID,))

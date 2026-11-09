@@ -21,6 +21,8 @@ RULE = RuleName.ERROR_SPIKE
 MIN_WINDOWS: Final = 3
 _EPOCH: Final = datetime(1970, 1, 1, tzinfo=UTC)
 _SECOND: Final = timedelta(seconds=1)
+_EARLIEST: Final = datetime.min.replace(tzinfo=UTC)
+_LATEST: Final = datetime.max.replace(tzinfo=UTC)
 
 
 def run(context: AnalysisContext, config: ErrorSpikeConfig) -> RuleOutcome:
@@ -72,6 +74,21 @@ def _window(timestamp: datetime, window_s: int) -> int:
     return ((timestamp - _EPOCH) // _SECOND) // window_s
 
 
+def _window_bound(index: int, window_s: int) -> datetime:
+    """Start of window ``index``, clamped to the dates that can be represented.
+
+    The windows that contain the first and last moments of year 1 and year
+    9999 can extend beyond them: the end of the last one is 10000-01-01, and
+    with a ``window_s`` that does not divide the seconds since year 1, the
+    first one starts before it.
+    """
+    seconds = index * window_s
+    try:
+        return _EPOCH + timedelta(seconds=seconds)
+    except OverflowError:
+        return _EARLIEST if seconds < 0 else _LATEST
+
+
 def _consecutive_runs(indexes: list[int]) -> list[list[int]]:
     runs: list[list[int]] = []
     for index in indexes:
@@ -91,8 +108,8 @@ def _finding(
     threshold: float,
     excluded: int,
 ) -> Finding:
-    start = _EPOCH + timedelta(seconds=windows[0] * config.window_s)
-    end = _EPOCH + timedelta(seconds=(windows[-1] + 1) * config.window_s)
+    start = _window_bound(windows[0], config.window_s)
+    end = _window_bound(windows[-1] + 1, config.window_s)
     events = [event for index in windows for event in by_window[index]]
     peak = max(len(by_window[index]) for index in windows)
     label_of = context.label_of
@@ -136,7 +153,8 @@ def _insufficient() -> RuleOutcome:
 
 
 def _iso(value: datetime) -> str:
-    return value.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # isoformat, not strftime: "%Y" does not pad years before 1000 on Linux.
+    return value.isoformat(timespec="seconds").removesuffix("+00:00") + "Z"
 
 
 def _number(value: float) -> str:

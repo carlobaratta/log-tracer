@@ -19,6 +19,7 @@ from typer.testing import CliRunner, Result
 
 from log_tracer import cli
 from log_tracer.cli import app
+from log_tracer.reporting import json_report
 
 TEXT = "2026-10-16T14:00:00Z INFO [api] fine request_id=r1\n"
 ERROR = "2026-10-16T14:00:00Z ERROR [api] boom\n"
@@ -279,6 +280,39 @@ def test_unexpected_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(cli, "run_analysis", explode)
     (tmp_path / "app.log").write_text(TEXT, encoding="utf-8")
     result = CliRunner().invoke(app, ["analyze", "app.log"])
+    assert result.exit_code == 70
+    assert result.stdout == ""
+    assert "Internal error: this is a bug in log-tracer" in result.stderr
+    assert "RuntimeError: kaboom" in result.stderr
+
+
+@pytest.mark.parametrize(
+    ("target", "args"),
+    [
+        ("render_report", ("analyze", "app.log", "--no-save")),
+        ("json_report.dumps", ("analyze", "app.log", "--no-save", "--format", "json")),
+        ("render_report", ("report",)),
+        ("render_top_errors", ("top-errors", "app.log")),
+        ("json_report.dumps_top_errors", ("top-errors", "app.log", "--format", "json")),
+        ("render_timeline", ("inspect", "r1", "app.log")),
+        ("json_report.dumps_inspection", ("inspect", "r1", "app.log", "--format", "json")),
+    ],
+)
+def test_unexpected_error_while_writing_the_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str, args: tuple[str, ...]
+) -> None:
+    # "Errore inatteso" also covers the last step of a command: a bug while
+    # rendering or serializing the output exits with 70, not with the 1 of --fail-on.
+    def explode(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("kaboom")
+
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "app.log").write_text(TEXT, encoding="utf-8")
+    if args[0] == "report":
+        assert CliRunner().invoke(app, ["analyze", "app.log"]).exit_code == 0
+    owner = json_report if target.startswith("json_report.") else cli
+    monkeypatch.setattr(owner, target.removeprefix("json_report."), explode)
+    result = CliRunner().invoke(app, list(args))
     assert result.exit_code == 70
     assert result.stdout == ""
     assert "Internal error: this is a bug in log-tracer" in result.stderr

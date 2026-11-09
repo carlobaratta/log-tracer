@@ -255,10 +255,11 @@ def top_errors(
             config, report=dataclasses.replace(config.report, top_errors=limit)
         )
     report = _run(paths, config, input_format, filters)
-    if output_format is OutputFormat.JSON:
-        typer.echo(json_report.dumps_top_errors(report), nl=False)
-    else:
-        _stdout().print(render_top_errors(report))
+    with _exit_on_error():
+        if output_format is OutputFormat.JSON:
+            typer.echo(json_report.dumps_top_errors(report), nl=False)
+        else:
+            _stdout().print(render_top_errors(report))
 
 
 @app.command("inspect")
@@ -291,10 +292,10 @@ def inspect_command(
                 f"no event has request_id or trace_id '{query}'",
                 hint="identifiers are matched exactly, including upper and lower case",
             )
-    if output_format is OutputFormat.JSON:
-        typer.echo(json_report.dumps_inspection(inspection), nl=False)
-    else:
-        _stdout().print(render_timeline(inspection))
+        if output_format is OutputFormat.JSON:
+            typer.echo(json_report.dumps_inspection(inspection), nl=False)
+        else:
+            _stdout().print(render_timeline(inspection))
 
 
 # --- Helpers ---------------------------------------------------------------------------
@@ -326,15 +327,16 @@ def _inspect(
 
 
 def _print_report(report: Report, output_format: OutputFormat, output: Path | None) -> None:
-    report_json = json_report.dumps(report)
-    if output is not None:
-        # Written before stdout: if this fails, nothing partial is printed.
-        with _exit_on_error():
+    # Guarded too: a bug while rendering exits with 70, not with the 1 of --fail-on.
+    with _exit_on_error():
+        report_json = json_report.dumps(report)
+        if output is not None:
+            # Written before stdout: if this fails, nothing partial is printed.
             _write(output, report_json)
-    if output_format is OutputFormat.JSON:
-        typer.echo(report_json, nl=False)
-    else:
-        _stdout().print(render_report(report))
+        if output_format is OutputFormat.JSON:
+            typer.echo(report_json, nl=False)
+        else:
+            _stdout().print(render_report(report))
 
 
 def _load_config(path: Path | None) -> AnalysisConfig:
@@ -414,6 +416,9 @@ def _exit_on_error() -> Iterator[None]:
     try:
         yield
     except typer.Exit:
+        raise
+    except BrokenPipeError:
+        # The reader of stdout went away (`| head`): not a bug, so not code 70.
         raise
     except ConfigError as error:
         _print_error(error)

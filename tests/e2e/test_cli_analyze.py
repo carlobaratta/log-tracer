@@ -680,6 +680,34 @@ def test_error_spike_is_reported(in_tmp: Path) -> None:
     assert (spike["evidence"]["baseline"], spike["evidence"]["threshold"]) == (1.0, 5.0)
 
 
+def test_huge_durations_are_invalid_and_the_report_is_valid_json(in_tmp: Path) -> None:
+    # NFR-7, JL-3, §2.2: 400 digits would become infinity, which JSON cannot hold.
+    digits = "9" * 400
+    (in_tmp / "app.log").write_text(
+        f"2026-10-16T14:00:00Z ERROR [api] slow duration_ms={digits}\n", encoding="utf-8"
+    )
+    record = {"ts": "2026-10-16T14:00:00Z", "level": "error", "msg": "slow", "duration_ms": digits}
+    (in_tmp / "app.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+    report = report_of(invoke("analyze", "app.log", "app.jsonl", "--format", "json"))
+    assert report["data_quality"]["field_issues"]["duration_ms.invalid"] == 2
+    assert report["rules"][1] == {
+        "rule": "high_latency",
+        "status": "skipped",
+        "reason": "no_duration_data",
+    }
+
+
+def test_error_spike_at_the_end_of_year_9999(in_tmp: Path) -> None:
+    # NFR-7, RUL-4: the window after the last one cannot be represented.
+    lines = ["9999-12-31T23:57:00Z INFO [api] start\n"] + [
+        f"9999-12-31T23:59:{second:02d}Z ERROR [api] boom\n" for second in range(6)
+    ]
+    (in_tmp / "app.log").write_text("".join(lines), encoding="utf-8")
+    report = report_of(invoke("analyze", "app.log", "--format", "json"))
+    (spike,) = [f for f in report["findings"] if f["rule"] == "error_spike"]
+    assert spike["evidence"]["end"] == "9999-12-31T23:59:59.999999Z"
+
+
 def test_error_spike_parameters_come_from_the_configuration(in_tmp: Path) -> None:
     write_spike_log(in_tmp)
     (in_tmp / "cfg.toml").write_text("[error_spike]\nmin_errors = 15\n", encoding="utf-8")
